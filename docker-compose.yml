@@ -1,0 +1,18 @@
+services:
+  nodepool:
+    build: .
+    container_name: nodepool
+    restart: unless-stopped
+    ports:
+      - "8899:8899"
+    volumes:
+      - ./data:/app/data          # SQLite 数据库持久化
+      - ./output:/app/output      # subs-check 输出
+      - ./config:/app/config      # 配置文件
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8899/api/nodes/stats"]
+      interval: 60s
+      timeout: 10s
+      retries: 3

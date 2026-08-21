@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-journal
+.env
+.venv/
+venv/
+node_modules/
+*.tar.gz
+output/
+config/subs-check.yaml*_TODO.md

@@ -1,0 +1,26 @@
+alive-test-url: http://gstatic.com/generate_204
+check-interval: 60
+concurrent: 60
+download-mb: 1
+download-timeout: 8
+filter: []
+listen-port: :8199
+media-check: false
+media-concurrent: 10
+min-speed: 256
+node-prefix: ''
+output-dir: ./output
+print-progress: false
+rename-node: true
+save-method: local
+source:
+  subscriptions: []
+  url-subscriptions: []
+speed-concurrent: 30
+speed-test-url: http://cachefly.cachefly.net/10mb.test
+sub-urls:
+- https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge_base64.txt
+sub-urls-concurrent: 20
+sub-urls-retry: 3
+timeout: 3000
+total-speed-limit: 0

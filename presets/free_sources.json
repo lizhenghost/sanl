@@ -1,0 +1,14 @@
+[
+  {"name": "Pawdroid/Free-servers", "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/clash.yml", "type": "github", "category": "free", "enabled": true},
+  {"name": "mahdibland/V2RayAggregator", "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge_base64.txt", "type": "github", "category": "free", "enabled": true},
+  {"name": "free-nodes/clashfree", "url": "https://raw.githubusercontent.com/free-nodes/clashfree/main/clash.yml", "type": "github", "category": "free", "enabled": true},
+  {"name": "snakem982/proxypool", "url": "https://raw.githubusercontent.com/snakem982/proxypool/main/source/freenode", "type": "github", "category": "free", "enabled": true},
+  {"name": "mermeroo/V2RAY-CLASH-BASE64", "url": "https://raw.githubusercontent.com/mermeroo/V2RAY-CLASH-BASE64/main/sub.txt", "type": "github", "category": "free", "enabled": true},
+  {"name": "xiaoji235/airport-free", "url": "https://raw.githubusercontent.com/xiaoji235/airport-free/main/sub.txt", "type": "github", "category": "free", "enabled": true},
+  {"name": "paidki/FreeNodes", "url": "https://raw.githubusercontent.com/paidki/FreeNodes/main/sub.txt", "type": "github", "category": "free", "enabled": true},
+  {"name": "pepslsub/free", "url": "https://raw.githubusercontent.com/pepslsub/free/main/sub", "type": "github", "category": "free", "enabled": true},
+  {"name": "Alvin9999/pac2", "url": "https://raw.githubusercontent.com/Alvin9999/pac2/master/clash.meta.yaml", "type": "github", "category": "free", "enabled": true},
+  {"name": "chengdoudou/free-node", "url": "https://raw.githubusercontent.com/chengdoudou/free-node/main/clash.txt", "type": "github", "category": "free", "enabled": true},
+  {"name": "RUNBLACK/clashnode", "url": "https://raw.githubusercontent.com/RUNBLACK/clashnode/main/clashnode.yml", "type": "github", "category": "free", "enabled": true},
+  {"name": "huyz2023/free-proxy", "url": "https://raw.githubusercontent.com/huyz2023/free-proxy/main/sub.txt", "type": "github", "category": "free", "enabled": true}
+]

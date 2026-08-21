@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx pytest
+
+      - name: Syntax check
+        run: python -m compileall src scripts main.py -q
+
+      - name: Import & init test
+        run: |
+          python - <<'EOF'
+          from src.api.api import create_app
+          app = create_app()
+          routes = [r.path for r in app.routes]
+          assert any('/sub/{token}/{fmt}' in p for p in routes), 'missing /sub route'
+          assert any('/api/geoip/refresh' in p for p in routes), 'missing geoip route'
+          print(f'✅ App created, {len(routes)} routes registered')
+          EOF
+
+      - name: Frontend JS check
+        run: |
+          python - <<'EOF'
+          import re
+          html = open('static/index.html').read()
+          js = re.search(r'<script>(.*)</script>', html, re.DOTALL).group(1)
+          for fn in ['renderTokens','renderUsers','renderMap','drawTrendChart','renderSubQR','closeModal']:
+              assert f'function {fn}' in js, f'missing {fn}'
+          assert js.count('{') == js.count('}'), 'unbalanced braces'
+          print('✅ Frontend OK')
+          EOF

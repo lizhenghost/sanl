@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NodePool - 节点池聚合平台</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+        .container { display: flex; min-height: 100vh; }
+        .sidebar { width: 240px; background: #1e293b; padding: 20px; flex-shrink: 0; display: flex; flex-direction: column; }
+        .main { flex: 1; padding: 30px; overflow-y: auto; }
+        .logo { font-size: 24px; font-weight: bold; color: #38bdf8; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        .logo span { color: #94a3b8; font-size: 14px; font-weight: normal; }
+        .nav-item { padding: 12px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s; margin-bottom: 4px; display: flex; align-items: center; gap: 12px; }
+        .nav-item:hover { background: #334155; }
+        .nav-item.active { background: #0ea5e9; color: white; }
+        .sidebar-footer { margin-top: auto; padding-top: 20px; color: #64748b; font-size: 12px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: #1e293b; padding: 24px; border-radius: 12px; border: 1px solid #334155; }
+        .stat-value { font-size: 36px; font-weight: bold; color: #38bdf8; }
+        .stat-label { color: #94a3b8; margin-top: 8px; }
+        .table-container { background: #1e293b; border-radius: 12px; overflow: hidden; border: 1px solid #334155; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 14px 20px; text-align: left; border-bottom: 1px solid #334155; font-size: 14px; }
+        th { background: #0f172a; color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 12px; }
+        tr:hover { background: #334155; }
+        .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+        .badge-success { background: #22c55e; color: white; }
+        .badge-warning { background: #f59e0b; color: white; }
+        .badge-danger { background: #ef4444; color: white; }
+        .badge-info { background: #3b82f6; color: white; }
+        .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-primary { background: #0ea5e9; color: white; }
+        .btn-primary:hover { background: #0284c7; }
+        .btn-secondary { background: #334155; color: white; }
+        .btn-secondary:hover { background: #475569; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; color: #94a3b8; margin-bottom: 8px; font-size: 14px; }
+        .form-input { width: 100%; padding: 12px 16px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 14px; }
+        .form-input:focus { outline: none; border-color: #0ea5e9; }
+        select.form-input { cursor: pointer; }
+        textarea.form-input { min-height: 100px; font-family: monospace; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: #1e293b; border-radius: 16px; padding: 30px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-title { font-size: 20px; font-weight: bold; }
+        .modal-close { background: none; border: none; color: #94a3b8; font-size: 24px; cursor: pointer; }
+        .chart-container { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; margin-bottom: 20px; }
+        .chart { height: 300px; }
+        .chart-tall { height: 500px; }
+        .page-title { font-size: 28px; font-weight: bold; margin-bottom: 24px; }
+        .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+        .empty { text-align: center; padding: 60px 20px; color: #64748b; }
+        .empty-icon { font-size: 48px; margin-bottom: 16px; }
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #334155; border-radius: 50%; border-top-color: #0ea5e9; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 24px; border-radius: 8px; color: white; z-index: 2000; animation: slideIn 0.3s; }
+        .toast-success { background: #22c55e; }
+        .toast-error { background: #ef4444; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .flex { display: flex; gap: 10px; flex-wrap: wrap; }
+        .flex-center { align-items: center; }
+        .mt-4 { margin-top: 16px; }
+        .mb-4 { margin-bottom: 16px; }
+        .text-muted { color: #64748b; }
+        .token-display { background: #0f172a; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 13px; word-break: break-all; user-select: all; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .preset-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; }
+        .preset-card:hover { border-color: #0ea5e9; }
+        .preset-card.selected { border-color: #22c55e; background: #1a2e3b; }
+        .preset-card.disabled { opacity: 0.5; cursor: not-allowed; }
+        .preset-name { font-weight: 600; margin-bottom: 4px; }
+        .preset-url { font-size: 11px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (max-width: 768px) {
+            .container { flex-direction: column; }
+            .sidebar { width: 100%; padding: 10px 12px; display: flex; align-items: center; gap: 8px; overflow-x: auto; }
+            .sidebar .logo { white-space: nowrap; margin-bottom: 0; }
+            .sidebar nav { display: flex; gap: 4px; flex: 1; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .sidebar nav::-webkit-scrollbar { display: none; }
+            .nav-item { white-space: nowrap; font-size: 13px; padding: 8px 10px; }
+            .main { padding: 12px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .grid-2 { grid-template-columns: 1fr; }
+            .page-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .page-title { font-size: 20px; }
+            .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .table-container table { min-width: 560px; }
+            .chart { height: 240px !important; }
+            .flex { flex-wrap: wrap; gap: 8px; }
+        }
+        @media (max-width: 400px) {
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .nav-item { font-size: 12px; padding: 7px 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo">🌐 NodePool <span>v2.0</span></div>
+            <nav>
+                <div class="nav-item active" data-page="dashboard">📊 仪表盘</div>
+                <div class="nav-item" data-page="nodes">🔗 节点列表</div>
+                <div class="nav-item" data-page="map">🌍 世界地图</div>
+                <div class="nav-item" data-page="sources">📡 数据源</div>
+                <div class="nav-item" data-page="check">⚡ 测速任务</div>
+                <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
+                <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
+                <div class="nav-item" data-page="users">👥 用户管理</div>
+            </nav>
+            <div class="sidebar-footer">
+                <div id="last-check">最近检查: --</div>
+                <div id="total-nodes">总节点: 0</div>
+            </div>
+        </aside>
+        <main class="main" id="main-content"></main>
+    </div>
+    <div id="toast-container"></div>
+    <!-- 通用模态框 -->
+    <div class="modal" id="modal-overlay">
+        <div class="modal-content" id="modal-content"></div>
+    </div>
+
+    <script>
+        const API = '/api';
+        let currentPage = 'dashboard';
+        let allNodes = [];
+
+        // ===== 页面渲染 =====
+        function showToast(msg, type = 'success') {
+            const c = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            t.className = `toast toast-${type}`;
+            t.textContent = msg;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        }
+
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                currentPage = item.dataset.page;
+                renderPage(currentPage);
+            });
+        });
+
+        function renderPage(page) {
+            const main = document.getElementById('main-content');
+            switch(page) {
+                case 'dashboard': renderDashboard(main); break;
+                case 'nodes': renderNodes(main); break;
+                case 'map': renderMap(main); break;
+                case 'sources': renderSources(main); break;
+                case 'check': renderCheck(main); break;
+                case 'subscribe': renderSubscribe(main); break;
+                case 'tokens': renderTokens(main); break;
+                case 'users': renderUsers(main); break;
+            }
+        }
+
+        // ===== 仪表盘 =====
+        function renderDashboard(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">📊 仪表盘</h1>
+                    <div class="flex">
+                        <button class="btn btn-secondary" onclick="loadDashboard()">🔄 刷新</button>
+                        <button class="btn btn-primary" onclick="runCheck()">⚡ 立即测速</button>
+                    </div>
+                </div>
+                <div class="stats-grid" id="dash-stats"></div>
+                <div class="grid-2">
+                    <div class="chart-container"><h3 style="margin-bottom:12px;">国家分布</h3><div id="chart-country" class="chart"></div></div>
+                    <div class="chart-container"><h3 style="margin-bottom:12px;">协议分布</h3><div id="chart-type" class="chart"></div></div>
+                </div>
+                <div class="chart-container"><h3 style="margin-bottom:12px;">延迟分布</h3><div id="chart-latency" class="chart" style="height:200px;"></div></div>
+                <div class="chart-container"><h3 style="margin-bottom:12px;">📈 测速历史趋势</h3><div id="chart-trend" class="chart" style="height:240px;"></div></div>
+            `;
+            loadDashboard();
+        }
+
+        async function loadDashboard() {
+            try {
+                const [statsRes, nodesRes, sourcesRes, rankRes] = await Promise.all([
+                    fetch(`${API}/nodes/stats`), fetch(`${API}/nodes?limit=100`),
+                    fetch(`${API}/sources`), fetch(`${API}/ranking?limit=5`)
+                ]);
+                const stats = await statsRes.json();
+                const nodes = await nodesRes.json();
+                const sources = await sourcesRes.json();
+                const rank = await rankRes.json();
+                allNodes = nodes;
+
+                const active = stats.active || 0, total = stats.total || 0;
+                document.getElementById('total-nodes').textContent = `总节点: ${total}`;
+                document.getElementById('dash-stats').innerHTML = `
+                    <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总节点数</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#22c55e;">${active}</div><div class="stat-label">可用节点</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#f59e0b;">${sources.length}</div><div class="stat-label">数据源数</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#38bdf8;">${rank.stats?.avg_score || 0}</div><div class="stat-label">平均评分</div></div>
+                `;
+
+                const activeNodes = nodes.filter(n => n.status === 'active');
+                drawPieChart('chart-country', Object.entries(stats.countries || {}).map(([k,v]) => ({name:k,value:v})));
+                const types = {}; nodes.forEach(n => { types[n.node_type] = (types[n.node_type]||0)+1; });
+                drawPieChart('chart-type', Object.entries(types).map(([k,v]) => ({name:k.toUpperCase(),value:v})));
+                const ranges = {'0-100ms':0,'100-200ms':0,'200-500ms':0,'500ms+':0};
+                activeNodes.forEach(n => { if(n.latency<100) ranges['0-100ms']++; else if(n.latency<200) ranges['100-200ms']++; else if(n.latency<500) ranges['200-500ms']++; else ranges['500ms+']++; });
+                drawBarChart('chart-latency', Object.keys(ranges), Object.values(ranges));
+                // 历史趋势
+                try {
+                    const trend = await (await fetch(`${API}/stats/trend?limit=30`)).json();
+                    drawTrendChart('chart-trend', trend);
+                } catch(e) { console.warn('trend load failed', e); }
+            } catch(e) { console.error('Dashboard error:', e); }
+        }
+
+        function drawTrendChart(id, trend) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const chart = echarts.init(el);
+            if (!trend || !trend.length) {
+                el.innerHTML = '<div class="empty">暂无测速历史，跑一次测速后生成趋势</div>';
+                return;
+            }
+            const times = trend.map(t => t.time ? new Date(t.time*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-');
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['存活节点','总节点'], textStyle: { color: '#94a3b8' } },
+                grid: { left: 40, right: 16, bottom: 24, top: 36 },
+                xAxis: { type: 'category', data: times, axisLabel: { color: '#64748b', fontSize: 10 } },
+                yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { color: '#1e293b' } } },
+                series: [
+                    { name: '存活节点', type: 'line', smooth: true, data: trend.map(t=>t.alive), itemStyle: { color: '#22c55e' }, areaStyle: { opacity: 0.15 } },
+                    { name: '总节点', type: 'line', smooth: true, data: trend.map(t=>t.total), itemStyle: { color: '#38bdf8' } }
+                ]
+            });
+        }
+
+        function drawPieChart(id, data) {
+            const chart = echarts.init(document.getElementById(id));
+            chart.setOption({ tooltip:{trigger:'item'}, series:[{type:'pie',radius:['40%','70%'],data,label:{show:true,formatter:'{b}: {c}'}}] });
+        }
+        function drawBarChart(id, x, y) {
+            const chart = echarts.init(document.getElementById(id));
+            chart.setOption({ tooltip:{trigger:'axis'}, xAxis:{type:'category',data:x}, yAxis:{type:'value'}, series:[{data:y,type:'bar',itemStyle:{color:'#0ea5e9'}}] });
+        }
+
+        // ===== 节点列表 =====
+        function renderNodes(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🔗 节点列表</h1>
+                    <div class="flex">
+                        <select class="form-input" style="width:120px;" id="nf-status" onchange="loadNodes()">
+                            <option value="">全部状态</option>
+                            <option value="active">可用</option>
+                            <option value="inactive">不可用</option>
+                        </select>
+                        <select class="form-input" style="width:120px;" id="nf-type" onchange="loadNodes()">
+                            <option value="">全部协议</option>
+                            <option value="vmess">VMess</option>
+                            <option value="vless">VLESS</option>
+                            <option value="ss">SS</option>
+                            <option value="trojan">Trojan</option>
+                            <option value="hysteria2">Hy2</option>
+                        </select>
+                        <select class="form-input" style="width:130px;" id="nf-sort" onchange="loadNodes()">
+                            <option value="latency">按延迟</option>
+                            <option value="score">按评分</option>
+                            <option value="speed">按速度</option>
+                            <option value="created">按新增</option>
+                            <option value="country">按国家</option>
+                        </select>
+                        <select class="form-input" style="width:100px;" id="nf-order" onchange="loadNodes()">
+                            <option value="asc">升序</option>
+                            <option value="desc">降序</option>
+                        </select>
+                        <input class="form-input" style="width:200px;" id="nf-search" placeholder="搜索..." oninput="filterNodes()">
+                    </div>
+                </div>
+                <div class="table-container"><table><thead><tr>
+                    <th>名称</th><th>协议</th><th>国家</th><th>延迟</th><th>速度</th><th>评分</th><th>等级</th><th>状态</th>
+                </tr></thead><tbody id="nodes-tbody"></tbody></table></div>
+                <div class="flex-center flex mt-4" id="nodes-pagination"></div>
+            `;
+            loadNodes();
+        }
+
+        let nodePage = 0, nodePageSize = 50;
+
+        async function loadNodes() {
+            const status = document.getElementById('nf-status').value;
+            const type = document.getElementById('nf-type').value;
+            const sort = document.getElementById('nf-sort') ? document.getElementById('nf-sort').value : 'latency';
+            const order = document.getElementById('nf-order') ? document.getElementById('nf-order').value : 'asc';
+            let url = `${API}/nodes?limit=200&sort=${sort}&order=${order}`;
+            if (status) url += `&status=${status}`;
+            if (type) url += `&node_type=${type}`;
+            try {
+                const nodes = await (await fetch(url)).json();
+                allNodes = nodes;
+                nodePage = 0;
+                renderNodePage();
+            } catch(e) { console.error(e); }
+        }
+
+        function filterNodes() {
+            const q = (document.getElementById('nf-search').value || '').toLowerCase();
+            if (!q) { renderNodePage(); return; }
+            const filtered = allNodes.filter(n => (n.node_name||'').toLowerCase().includes(q) || (n.country||'').includes(q));
+            renderNodeTable(filtered);
+            document.getElementById('nodes-pagination').innerHTML = '';
+        }
+
+        function renderNodePage() {
+            const start = nodePage * nodePageSize;
+            const page = allNodes.slice(start, start + nodePageSize);
+            renderNodeTable(page);
+            const total = Math.ceil(allNodes.length / nodePageSize);
+            let html = '';
+            if (nodePage > 0) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage--;renderNodePage()">上一页</button>`;
+            html += `<span class="text-muted" style="padding:0 12px;">${nodePage+1}/${total}</span>`;
+            if (start + nodePageSize < allNodes.length) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage++;renderNodePage()">下一页</button>`;
+            document.getElementById('nodes-pagination').innerHTML = html;
+        }
+
+        function renderNodeTable(nodes) {
+            const tbody = document.getElementById('nodes-tbody');
+            if (!nodes.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>'; return; }
+            tbody.innerHTML = nodes.map(n => {
+                const speed = n.download_speed ? (n.download_speed >= 1048576 ? (n.download_speed/1048576).toFixed(1)+'MB/s' : Math.round(n.download_speed/1024)+'KB/s') : '-';
+                const score = n.score || 0;
+                const scoreColor = score >= 50 ? '#22c55e' : score >= 20 ? '#f59e0b' : '#64748b';
+                const statusClass = n.status === 'active' ? 'badge-success' : n.status === 'inactive' ? 'badge-danger' : 'badge-warning';
+                const grade = n.grade ? `<span class="badge ${score>=70?'badge-success':score>=50?'badge-warning':'badge-danger'}">${n.emoji||''} ${n.grade}</span>` : '-';
+                return `<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${n.node_name||'-'}</td>
+                    <td><span class="badge badge-info">${(n.node_type||'').toUpperCase()}</span></td>
+                    <td>${n.country||'🌐'}</td>
+                    <td>${n.latency ? n.latency+'ms' : '-'}</td><td>${speed}</td>
+                    <td style="color:${scoreColor};">${score.toFixed(1)}</td>
+                    <td>${grade}</td>
+                    <td><span class="badge ${statusClass}">${n.status}</span></td></tr>`;
+            }).join('');
+        }
+
+        // ===== 世界地图 =====
+        let mapChart = null;
+
+        function renderMap(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🌍 世界地图</h1>
+                    <div class="flex">
+                        <button class="btn btn-secondary" onclick="loadMapData()">🔄 刷新</button>
+                        <button class="btn btn-primary" onclick="refreshGeoIP()">🛰 识别出口位置</button>
+                    </div>
+                </div>
+                <div id="map-stats" class="stats-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+                <div class="chart-container"><div id="chart-world" class="chart chart-tall"></div></div>
+                <div class="chart-container"><h3 style="margin-bottom:12px;">各国节点数</h3><div id="chart-country-bar" class="chart" style="height:250px;"></div></div>
+            `;
+            loadMapData();
+        }
+
+        async function refreshGeoIP() {
+            showToast('GeoIP 识别中（ip-api 免费接口，最多约 1 分钟）...');
+            try {
+                const res = await fetch(`${API}/geoip/refresh?limit=300`, { method: 'POST' });
+                const data = await res.json();
+                showToast(`GeoIP 完成：更新 ${data.updated}/${data.total} 个节点出口`);
+                loadMapData();
+            } catch(e) { showToast('GeoIP 刷新失败: ' + e.message, 'error'); }
+        }
+
+        async function loadMapData() {
+            try {
+                const [mapRes, statsRes] = await Promise.all([fetch(`${API}/map`), fetch(`${API}/nodes/stats`)]);
+                const mapData = await mapRes.json();
+                const stats = await statsRes.json();
+
+                const countries = mapData.countries || [];
+                const total = countries.reduce((s,c) => s+c.count, 0);
+                document.getElementById('map-stats').innerHTML = `
+                    <div class="stat-card"><div class="stat-value">${countries.length}</div><div class="stat-label">覆盖国家/地区</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#22c55e;">${total}</div><div class="stat-label">已定位节点</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#f59e0b;">${stats.active||0}</div><div class="stat-label">可用节点</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#38bdf8;">${stats.total||0}</div><div class="stat-label">总节点</div></div>
+                `;
+
+                // 世界地图散点图
+                if (mapChart) mapChart.dispose();
+                mapChart = echarts.init(document.getElementById('chart-world'));
+                const scatterData = mapData.scatter && mapData.scatter.length > 0 ? mapData.scatter :
+                    countries.map(c => ({name: c.name, value: [c.lng, c.lat, c.count]}));
+
+                mapChart.setOption({
+                    tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>节点数: ${p.value[2]}` },
+                    geo: { map: 'world', roam: true, zoom: 1.2, left: 0, right: 0,
+                        label: { show: false }, itemStyle: { areaColor: '#1e293b', borderColor: '#334155' },
+                        emphasis: { itemStyle: { areaColor: '#0ea5e9' } } },
+                    series: [{
+                        type: 'scatter', coordinateSystem: 'geo',
+                        data: scatterData.map(d => ({name: d.name, value: [d.value[0]||d.lng, d.value[1]||d.lat, d.value[2]||d.count]})),
+                        symbolSize: v => Math.max(5, Math.min(30, v[2] * 3)),
+                        itemStyle: { color: '#38bdf8', opacity: 0.7 },
+                        encode: { value: 2 }
+                    }]
+                });
+
+                // 国家柱状图
+                const top10 = countries.slice(0, 15);
+                drawBarChart('chart-country-bar', top10.map(c => c.name), top10.map(c => c.count));
+            } catch(e) { console.error('Map error:', e); }
+        }
+
+        // ===== 数据源 =====
+        function renderSources(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">📡 数据源</h1>
+                    <div class="flex">
+                        <button class="btn btn-secondary" onclick="showPresetModal()">📦 预置源</button>
+                        <button class="btn btn-secondary" onclick="showAddSourceModal()">➕ 手动添加</button>
+                        <button class="btn btn-secondary" onclick="showRawImportModal()">📋 粘贴导入</button>
+                        <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
+                    </div>
+                </div>
+                <div id="source-health" class="stats-grid" style="grid-template-columns:repeat(3,1fr);"></div>
+                <div class="table-container"><table><thead><tr>
+                    <th>名称</th><th>URL</th><th>类型</th><th>节点数</th><th>健康状态</th><th>操作</th>
+                </tr></thead><tbody id="sources-tbody"></tbody></table></div>
+            `;
+            loadSources();
+        }
+
+        async function loadSources() {
+            try {
+                const [sources, health] = await Promise.all([
+                    fetch(`${API}/sources`).then(r=>r.json()),
+                    fetch(`${API}/sources/health`).then(r=>r.json())
+                ]);
+                const total = sources.length, healthy = health.filter(h => h.healthy).length;
+                const nodeCount = sources.reduce((s,src) => s + (src.node_count||0), 0);
+                document.getElementById('source-health').innerHTML = `
+                    <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">数据源总数</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#22c55e;">${healthy}</div><div class="stat-label">健康源</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:#38bdf8;">${nodeCount}</div><div class="stat-label">累计节点</div></div>
+                `;
+                const tbody = document.getElementById('sources-tbody');
+                if (!sources.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">📭</div>暂无数据源，点击"预置源"一键导入</td></tr>'; return; }
+                tbody.innerHTML = sources.map(s => {
+                    const h = health.find(h => h.id === s.id);
+                    const isHealthy = h ? h.healthy : s.enabled;
+                    return `<tr><td>${s.name}</td>
+                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${s.url}</td>
+                        <td><span class="badge badge-info">${s.source_type}</span></td>
+                        <td>${s.node_count||0}</td>
+                        <td><span class="badge ${isHealthy ? 'badge-success' : 'badge-danger'}">${isHealthy ? '健康' : '异常'}</span></td>
+                        <td>
+                            <button class="btn btn-sm ${s.enabled ? 'btn-secondary' : 'btn-primary'}" onclick="toggleSource(${s.id},${!s.enabled})">${s.enabled ? '禁用' : '启用'}</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteSource(${s.id})">删除</button>
+                        </td></tr>`;
+                }).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function toggleSource(id, enabled) {
+            await fetch(`${API}/sources/${id}/enable?enabled=${enabled}`, {method:'PUT'});
+            showToast(enabled ? '已启用' : '已禁用');
+            loadSources();
+        }
+        async function deleteSource(id) {
+            if (!confirm('确定删除此数据源？')) return;
+            await fetch(`${API}/sources/${id}`, {method:'DELETE'});
+            showToast('已删除');
+            loadSources();
+        }
+
+        // 手动添加数据源
+        function showAddSourceModal() {
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = `
+                <div class="modal-header"><h2 class="modal-title">➕ 添加数据源</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                <div class="form-group"><label class="form-label">名称</label><input class="form-input" id="src-name" placeholder="如: GitHub源1"></div>
+                <div class="form-group"><label class="form-label">订阅 URL</label><input class="form-input" id="src-url" placeholder="https://raw.githubusercontent.com/..."></div>
+                <div class="form-group"><label class="form-label">类型</label><select class="form-input" id="src-type"><option value="github">GitHub</option><option value="telegram">Telegram</option><option value="other">其他</option></select></div>
+                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doAddSource()">添加</button></div>
+            `;
+        }
+        async function doAddSource() {
+            const name = document.getElementById('src-name').value;
+            const url = document.getElementById('src-url').value;
+            const type = document.getElementById('src-type').value;
+            if (!name || !url) { showToast('请填写完整信息', 'error'); return; }
+            try {
+                await fetch(`${API}/sources`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,source_type:type})});
+                closeModal(); showToast('添加成功'); loadSources();
+            } catch(e) { showToast('添加失败: '+e.message, 'error'); }
+        }
+
+        // 预置源导入
+        function showPresetModal() {
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = '<div class="modal-header"><h2 class="modal-title">📦 预置免费节点源</h2><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="preset-grid" id="preset-grid"><div class="empty">加载中...</div></div><div class="flex" style="justify-content:flex-end;margin-top:16px;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doImportPresets()">导入选中</button></div>';
+            loadPresets();
+        }
+        let selectedPresets = new Set();
+
+        async function loadPresets() {
+            try {
+                const presets = await (await fetch(`${API}/sources/presets`)).json();
+                const grid = document.getElementById('preset-grid');
+                grid.innerHTML = presets.map((p,i) => `
+                    <div class="preset-card ${p.already_added ? 'disabled' : ''}" data-idx="${i}" onclick="togglePreset(${i},${p.already_added})">
+                        <div class="preset-name">${p.already_added ? '✅ ' : ''}${p.name}</div>
+                        <div class="preset-url">${p.url}</div>
+                        <div style="font-size:11px;color:#64748b;margin-top:4px;">${p.already_added ? '已存在' : '点击选中'}</div>
+                    </div>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+        function togglePreset(idx, already) {
+            if (already) return;
+            const el = document.querySelector(`.preset-card[data-idx="${idx}"]`);
+            el.classList.toggle('selected');
+            if (selectedPresets.has(idx)) selectedPresets.delete(idx);
+            else selectedPresets.add(idx);
+        }
+        async function doImportPresets() {
+            if (selectedPresets.size === 0) { showToast('请先选择数据源', 'error'); return; }
+            try {
+                const res = await fetch(`${API}/sources/batch-import`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({source_ids:[...selectedPresets]})});
+                const data = await res.json();
+                showToast(`导入成功: ${data.imported.length} 个${data.skipped.length ? ', 跳过: '+data.skipped.length : ''}`);
+                closeModal(); loadSources();
+            } catch(e) { showToast('导入失败', 'error'); }
+        }
+
+        // 粘贴导入
+        function showRawImportModal() {
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = `
+                <div class="modal-header"><h2 class="modal-title">📋 粘贴导入</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                <div class="form-group"><label class="form-label">名称</label><input class="form-input" id="raw-name" placeholder="如: 我的订阅"></div>
+                <div class="form-group"><label class="form-label">Base64 订阅内容</label><textarea class="form-input" id="raw-content" placeholder="粘贴 Base64 编码的订阅内容..."></textarea></div>
+                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doRawImport()">导入</button></div>
+            `;
+        }
+        async function doRawImport() {
+            const name = document.getElementById('raw-name').value;
+            const content = document.getElementById('raw-content').value.trim();
+            if (!name || !content) { showToast('请填写完整信息', 'error'); return; }
+            try {
+                const res = await fetch(`${API}/sources/raw-import`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, content, source_type:'raw'})});
+                if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '导入失败'); }
+                closeModal(); showToast('导入成功'); loadSources();
+            } catch(e) { showToast('导入失败: '+e.message, 'error'); }
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.remove('show');
+            selectedPresets.clear();
+        }
+
+        // ===== 测速任务 =====
+        function renderCheck(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">⚡ 测速任务</h1>
+                    <button class="btn btn-primary" onclick="runCheck()">⚡ 立即测速</button>
+                </div>
+                <div class="table-container"><table><thead><tr>
+                    <th>ID</th><th>类型</th><th>状态</th><th>开始时间</th><th>耗时</th><th>结果</th>
+                </tr></thead><tbody id="check-tbody"></tbody></table></div>
+            `;
+            loadCheckHistory();
+        }
+
+        async function loadCheckHistory() {
+            try {
+                const jobs = await (await fetch(`${API}/check/history?limit=20`)).json();
+                const tbody = document.getElementById('check-tbody');
+                if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无任务记录</td></tr>'; return; }
+                tbody.innerHTML = jobs.map(j => {
+                    const st = j.started_at ? new Date(j.started_at*1000).toLocaleString() : '--';
+                    const dur = j.started_at && j.finished_at ? Math.round(j.finished_at - j.started_at)+'s' : '--';
+                    const badge = j.status === 'completed' ? 'badge-success' : j.status === 'failed' ? 'badge-danger' : 'badge-warning';
+                    return `<tr><td>#${j.id}</td><td>${j.job_type}</td>
+                        <td><span class="badge ${badge}">${j.status}</span></td>
+                        <td>${st}</td><td>${dur}</td>
+                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${j.error_message || j.result || '-'}</td></tr>`;
+                }).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function runCheck() {
+            try {
+                await fetch(`${API}/check/run`, {method:'POST'});
+                showToast('测速任务已启动（后台执行）');
+                setTimeout(() => { if (currentPage === 'check') loadCheckHistory(); }, 3000);
+            } catch(e) { showToast('启动失败: '+e.message, 'error'); }
+        }
+
+        // ===== 订阅输出 =====
+        function renderSubscribe(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">📥 订阅输出</h1></div>
+                <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
+                    <div class="stat-card"><div class="stat-value">Clash</div><div class="stat-label">YAML 格式</div></div>
+                    <div class="stat-card"><div class="stat-value">V2Ray</div><div class="stat-label">Base64 链接</div></div>
+                    <div class="stat-card"><div class="stat-value">Sing-box</div><div class="stat-label">JSON 格式</div></div>
+                    <div class="stat-card"><div class="stat-value">Base64</div><div class="stat-label">原始编码</div></div>
+                </div>
+                <div class="chart-container">
+                    <h3 style="margin-bottom:16px;">生成订阅链接</h3>
+                    <div class="form-group"><label class="form-label">格式</label>
+                        <select class="form-input" id="sub-fmt" style="max-width:200px;">
+                            <option value="clash">Clash YAML</option>
+                            <option value="v2ray">V2Ray</option>
+                            <option value="singbox">Sing-box</option>
+                            <option value="base64">Base64</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label class="form-label">数量限制</label>
+                        <input class="form-input" id="sub-limit" type="number" value="100" min="1" max="2000" style="max-width:200px;">
+                    </div>
+                    <div class="form-group"><label class="form-label">最低评分</label>
+                        <input class="form-input" id="sub-minscore" type="number" value="0" min="0" max="100" style="max-width:200px;">
+                    </div>
+                    <div class="flex">
+                        <button class="btn btn-primary" onclick="genSubLink()">🔗 生成链接</button>
+                        <button class="btn btn-secondary" onclick="copySubLink()">📋 复制链接</button>
+                        <a class="btn btn-secondary" id="sub-open" href="#" target="_blank" style="display:none;">↗ 打开</a>
+                    </div>
+                    <div class="token-display mt-4" id="sub-link" style="display:none;"></div>
+                    <div class="flex mt-4" style="align-items:flex-start;gap:24px;">
+                        <div>
+                            <h4 style="margin-bottom:8px;">📱 扫码导入</h4>
+                            <div id="sub-qr" style="background:#fff;padding:8px;border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成链接后显示二维码</span></div>
+                        </div>
+                        <div style="flex:1;min-width:240px;">
+                            <h4 style="margin-bottom:8px;">🔗 Token 订阅短链</h4>
+                            <p class="text-muted" style="font-size:12px;line-height:1.8;">
+                                创建 Token 后可使用短链格式：<br>
+                                <code style="color:#38bdf8;">/sub/&lt;token&gt;/clash</code><br>
+                                <code style="color:#38bdf8;">/sub/&lt;token&gt;/v2ray</code> ·
+                                <code style="color:#38bdf8;">/singbox</code> ·
+                                <code style="color:#38bdf8;">/base64</code><br>
+                                筛选参数：<code>?min_speed=10&max_latency=300&limit=100</code>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        let lastSubLink = '';
+        function genSubLink() {
+            const fmt = document.getElementById('sub-fmt').value;
+            const limit = document.getElementById('sub-limit').value || 100;
+            const minScore = document.getElementById('sub-minscore').value || 0;
+            lastSubLink = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=${limit}&min_score=${minScore}`;
+            const el = document.getElementById('sub-link');
+            el.textContent = lastSubLink;
+            el.style.display = 'block';
+            document.getElementById('sub-open').href = lastSubLink;
+            document.getElementById('sub-open').style.display = 'inline-flex';
+            renderSubQR(lastSubLink);
+        }
+        function renderSubQR(text) {
+            const container = document.getElementById('sub-qr');
+            if (!container) return;
+            container.innerHTML = '';
+            try {
+                new QRCode(container, { text, width: 180, height: 180, colorDark: '#0f172a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+            } catch(e) { container.innerHTML = '<span class="text-muted">QR 生成失败</span>'; }
+        }
+        function copySubLink() {
+            if (!lastSubLink) { showToast('请先生成链接', 'error'); return; }
+            navigator.clipboard.writeText(lastSubLink);
+            showToast('已复制到剪贴板');
+        }
+
+        // ===== Token 管理 =====
+        function renderTokens(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🔑 令牌管理</h1>
+                    <button class="btn btn-primary" onclick="showCreateTokenModal()">➕ 创建 Token</button>
+                </div>
+                <div class="table-container"><table><thead><tr>
+                    <th>ID</th><th>名称</th><th>Token 预览</th><th>权限</th><th>状态</th><th>最后使用</th><th>操作</th>
+                </tr></thead><tbody id="tokens-tbody"></tbody></table></div>
+            `;
+            loadTokens();
+        }
+
+        async function loadTokens() {
+            try {
+                const tokens = await (await fetch(`${API}/tokens`)).json();
+                const tbody = document.getElementById('tokens-tbody');
+                if (!tokens.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty"><div class="empty-icon">🔑</div>暂无 Token，点击"创建 Token"生成订阅访问凭证</td></tr>'; return; }
+                tbody.innerHTML = tokens.map(t => `
+                    <tr><td>#${t.id}</td><td>${t.name}</td>
+                        <td style="font-family:monospace;font-size:12px;">${t.token_preview || t.token.slice(0,8)+'...'}</td>
+                        <td><span class="badge badge-info">${t.permissions}</span></td>
+                        <td><span class="badge ${t.is_active ? 'badge-success' : 'badge-danger'}">${t.is_active ? '启用' : '禁用'}</span></td>
+                        <td>${t.last_used_at ? new Date(t.last_used_at*1000).toLocaleString() : '从未'}</td>
+                        <td>
+                            <button class="btn btn-sm ${t.is_active ? 'btn-secondary' : 'btn-primary'}" onclick="toggleToken(${t.id},${!t.is_active})">${t.is_active ? '禁用' : '启用'}</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteToken(${t.id})">删除</button>
+                        </td></tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function showCreateTokenModal() {
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = `
+                <div class="modal-header"><h2 class="modal-title">➕ 创建 Token</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                <div class="form-group"><label class="form-label">名称</label><input class="form-input" id="tk-name" placeholder="如: 我的手机订阅"></div>
+                <div class="form-group"><label class="form-label">权限</label>
+                    <select class="form-input" id="tk-perm"><option value="read">read（只读订阅）</option><option value="write">read-write</option></select>
+                </div>
+                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doCreateToken()">创建</button></div>
+            `;
+        }
+
+        let newTokenValue = '';
+        async function doCreateToken() {
+            const name = document.getElementById('tk-name').value || 'default';
+            const permissions = document.getElementById('tk-perm').value;
+            try {
+                const res = await fetch(`${API}/tokens`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, permissions})});
+                const data = await res.json();
+                newTokenValue = data.token;
+                document.getElementById('modal-content').innerHTML = `
+                    <div class="modal-header"><h2 class="modal-title">✅ Token 创建成功</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                    <p class="text-muted mb-4">请立即保存此 Token（仅显示一次）：</p>
+                    <div class="token-display">${data.token}</div>
+                    <div class="flex mt-4">
+                        <button class="btn btn-primary" onclick="navigator.clipboard.writeText('${data.token}');showToast('已复制')">📋 复制</button>
+                        <button class="btn btn-secondary" onclick="closeModal();loadTokens()">完成</button>
+                    </div>
+                `;
+            } catch(e) { showToast('创建失败', 'error'); }
+        }
+
+        async function toggleToken(id, active) {
+            await fetch(`${API}/tokens/${id}/toggle?is_active=${active}`, {method:'PUT'});
+            showToast(active ? '已启用' : '已禁用');
+            loadTokens();
+        }
+        async function deleteToken(id) {
+            if (!confirm('确定删除此 Token？使用它的订阅链接将立即失效')) return;
+            await fetch(`${API}/tokens/${id}`, {method:'DELETE'});
+            showToast('已删除');
+            loadTokens();
+        }
+
+        // ===== 用户管理 =====
+        function renderUsers(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">👥 用户管理</h1>
+                    <button class="btn btn-primary" onclick="showRegisterModal()">➕ 注册用户</button>
+                </div>
+                <div class="table-container"><table><thead><tr>
+                    <th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th>
+                </tr></thead><tbody id="users-tbody"></tbody></table></div>
+            `;
+            loadUsers();
+        }
+
+        async function loadUsers() {
+            try {
+                const users = await (await fetch(`${API}/users`)).json();
+                const tbody = document.getElementById('users-tbody');
+                if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">👥</div>暂无用户，注册第一个用户吧</td></tr>'; return; }
+                tbody.innerHTML = users.map(u => `
+                    <tr><td>#${u.id}</td><td>${u.username}</td>
+                        <td><span class="badge ${u.role === 'admin' ? 'badge-danger' : 'badge-info'}">${u.role}</span></td>
+                        <td><span class="badge ${u.is_active ? 'badge-success' : 'badge-warning'}">${u.is_active ? '正常' : '禁用'}</span></td>
+                        <td>${u.created_at ? new Date(u.created_at*1000).toLocaleString() : '--'}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" onclick="changeRole(${u.id},'${u.role === 'admin' ? 'user' : 'admin'}')">设为${u.role === 'admin' ? '用户' : '管理员'}</button>
+                            <button class="btn btn-sm ${u.is_active ? 'btn-danger' : 'btn-primary'}" onclick="toggleUser(${u.id},${!u.is_active})">${u.is_active ? '禁用' : '启用'}</button>
+                        </td></tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function showRegisterModal() {
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = `
+                <div class="modal-header"><h2 class="modal-title">➕ 注册用户</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                <div class="form-group"><label class="form-label">用户名</label><input class="form-input" id="reg-username" placeholder="至少 2 个字符"></div>
+                <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="reg-password" type="password" placeholder="至少 6 个字符"></div>
+                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doRegister()">注册</button></div>
+            `;
+        }
+
+        async function doRegister() {
+            const username = document.getElementById('reg-username').value;
+            const password = document.getElementById('reg-password').value;
+            if (!username || !password) { showToast('请填写完整信息', 'error'); return; }
+            try {
+                const res = await fetch(`${API}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username, password})});
+                if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '注册失败'); }
+                closeModal(); showToast('注册成功'); loadUsers();
+            } catch(e) { showToast(e.message, 'error'); }
+        }
+
+        async function changeRole(id, role) {
+            await fetch(`${API}/users/${id}/role?role=${role}`, {method:'PUT'});
+            showToast('角色已更新为 ' + role);
+            loadUsers();
+        }
+        async function toggleUser(id, active) {
+            await fetch(`${API}/users/${id}/toggle?is_active=${active}`, {method:'PUT'});
+            showToast(active ? '已启用' : '已禁用');
+            loadUsers();
+        }
+
+        // ===== 初始化 =====
+        renderPage('dashboard');
+
+        // 加载世界地图 GeoJSON 并注册
+        fetch('https://cdn.jsdelivr.net/npm/echarts@5.4.3/map/json/world.json')
+            .then(r => r.json())
+            .then(geoJson => { echarts.registerMap('world', geoJson); console.log('World map GeoJSON loaded'); })
+            .catch(e => console.error('Failed to load world GeoJSON:', e));
+
+        // 侧边栏状态定时刷新
+        setInterval(async () => {
+            try {
+                const stats = await (await fetch(`${API}/nodes/stats`)).json();
+                document.getElementById('total-nodes').textContent = `总节点: ${stats.total}`;
+            } catch(e) {}
+        }, 30000);
+    </script>
+</body>
+</html>

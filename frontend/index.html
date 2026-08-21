@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NodePool - 代理节点聚合平台</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; }
+    .header { background: #fff; border-bottom: 1px solid #eee; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+    .logo { font-size: 20px; font-weight: 600; color: #333; }
+    .stats { display: flex; gap: 24px; font-size: 14px; color: #666; }
+    .stat { display: flex; align-items: center; gap: 6px; }
+    .stat.active { color: #52c41a; }
+    .stat.inactive { color: #ff4d4f; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .controls { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+    .btn-primary { background: #1890ff; color: #fff; }
+    .btn-primary:hover { background: #40a9ff; }
+    .btn-secondary { background: #fff; color: #333; border: 1px solid #d9d9d9; }
+    .btn-secondary:hover { background: #f5f5f5; }
+    .search-box { flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+    .table-wrapper { background: #fff; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+    th { background: #fafafa; font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    tr:hover { background: #fafafa; }
+    .node-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 13px; }
+    .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+    .status-badge.active { background: #f6ffed; color: #52c41a; }
+    .status-badge.inactive { background: #fff1f0; color: #ff4d4f; }
+    .speed { font-family: monospace; font-size: 13px; color: #666; }
+    .speed.fast { color: #52c41a; }
+    .country { font-size: 18px; }
+    .empty { text-align: center; padding: 60px 20px; color: #999; }
+    .loading { text-align: center; padding: 40px; color: #999; }
+    .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+    .page-btn { padding: 6px 12px; border: 1px solid #d9d9d9; background: #fff; border-radius: 4px; cursor: pointer; }
+    .page-btn.active { background: #1890ff; color: #fff; border-color: #1890ff; }
+    .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    @media (max-width: 768px) {
+      .container { padding: 16px; }
+      .header { padding: 12px 16px; }
+      th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🚀 NodePool</div>
+    <div class="stats">
+      <div class="stat active">🟢 活跃: <span id="active-count">0</span></div>
+      <div class="stat inactive">🔴 失效: <span id="inactive-count">0</span></div>
+      <div class="stat">📊 总计: <span id="total-count">0</span></div>
+    </div>
+  </div>
+  <div class="container">
+    <div class="controls">
+      <input type="text" class="search-box" id="search" placeholder="搜索节点名称、国家...">
+      <button class="btn btn-primary" id="refresh-btn">🔄 刷新</button>
+      <button class="btn btn-secondary" id="check-btn">⚡ 手动测速</button>
+    </div>
+    <div class="table-wrapper">
+      <table id="nodes-table">
+        <thead>
+          <tr>
+            <th>节点名称</th>
+            <th>国家</th>
+            <th>类型</th>
+            <th>速度</th>
+            <th>状态</th>
+            <th>最后检测</th>
+          </tr>
+        </thead>
+        <tbody id="nodes-body"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+  <script>
+    const API = '/api';
+    let currentPage = 1;
+    const pageSize = 50;
+    let allNodes = [];
+
+    async function fetchStats() {
+      try {
+        const res = await fetch(`${API}/nodes/stats`);
+        const data = await res.json();
+        document.getElementById('total-count').textContent = data.total;
+        document.getElementById('active-count').textContent = data.active;
+        document.getElementById('inactive-count').textContent = data.inactive;
+      } catch (e) { console.error('Stats error:', e); }
+    }
+
+    async function fetchNodes(page = 1) {
+      const body = document.getElementById('nodes-body');
+      body.innerHTML = '<tr><td colspan="6" class="loading">加载中...</td></tr>';
+      try {
+        const res = await fetch(`${API}/nodes?page=${page}&limit=${pageSize}`);
+        const data = await res.json();
+        allNodes = data;
+        renderNodes(data);
+        renderPagination(page, data.length);
+      } catch (e) {
+        body.innerHTML = '<tr><td colspan="6" class="empty">加载失败</td></tr>';
+        console.error('Nodes error:', e);
+      }
+    }
+
+    function renderNodes(nodes) {
+      const body = document.getElementById('nodes-body');
+      if (!nodes.length) {
+        body.innerHTML = '<tr><td colspan="6" class="empty">暂无节点</td></tr>';
+        return;
+      }
+      body.innerHTML = nodes.map(n => `
+        <tr>
+          <td><span class="node-name">${escapeHtml(n.node_name)}</span></td>
+          <td><span class="country">${n.country || '🌐'}</span></td>
+          <td>${n.node_type}</td>
+          <td class="speed ${n.download_speed > 1024*1024 ? 'fast' : ''}">${formatSpeed(n.download_speed)}</td>
+          <td><span class="status-badge ${n.status}">${n.status === 'active' ? '✅ 可用' : '❌ 失效'}</span></td>
+          <td>${formatTime(n.last_checked_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderPagination(page, count) {
+      const pagination = document.getElementById('pagination');
+      const totalPages = Math.ceil(count / pageSize); // 简化处理
+      if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+      let html = '';
+      if (page > 1) html += `<button class="page-btn" onclick="fetchNodes(${page-1})">上一页</button>`;
+      for (let i = Math.max(1, page-2); i <= Math.min(totalPages, page+2); i++) {
+        html += `<button class="page-btn ${i===page?'active':''}" onclick="fetchNodes(${i})">${i}</button>`;
+      }
+      if (page < totalPages) html += `<button class="page-btn" onclick="fetchNodes(${page+1})">下一页</button>`;
+      pagination.innerHTML = html;
+    }
+
+    async function triggerCheck() {
+      const btn = document.getElementById('check-btn');
+      btn.disabled = true;
+      btn.textContent = '⏳ 测速中...';
+      try {
+        await fetch(`${API}/check/run`, { method: 'POST' });
+        setTimeout(() => { fetchStats(); fetchNodes(currentPage); }, 3000);
+      } catch (e) { alert('测速触发失败'); }
+      btn.disabled = false;
+      btn.textContent = '⚡ 手动测速';
+    }
+
+    function formatSpeed(bytes) {
+      if (!bytes) return '—';
+      if (bytes >= 1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB/s';
+      return (bytes/1024).toFixed(0) + ' KB/s';
+    }
+    function formatTime(ts) {
+      if (!ts) return '—';
+      return new Date(ts*1000).toLocaleString();
+    }
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById('search').addEventListener('input', (e) => {
+      const term = e.target.value.toLowerCase();
+      const filtered = allNodes.filter(n => 
+        n.node_name.toLowerCase().includes(term) || 
+        (n.country && n.country.toLowerCase().includes(term))
+      );
+      renderNodes(filtered);
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', () => { fetchStats(); fetchNodes(currentPage); });
+    document.getElementById('check-btn').addEventListener('click', triggerCheck);
+
+    fetchStats();
+    fetchNodes(1);
+    setInterval(() => { fetchStats(); fetchNodes(currentPage); }, 60000);
+  </script>
+</body>
+</html>

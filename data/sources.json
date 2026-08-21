@@ -1,0 +1,9 @@
+# 静态数据源（JSON 格式）
+# 格式：[{ "name": "来源名", "url": "订阅链接", "type": "clash|singbox|mixed" }]
+[
+  {
+    "name": "TestSource1",
+    "url": "https://example.com/sub",
+    "type": "mixed"
+  }
+]
