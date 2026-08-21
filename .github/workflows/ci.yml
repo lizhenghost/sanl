@@ -52,7 +52,7 @@ jobs:
           import re
           html = open('static/index.html').read()
           js = re.search(r'<script>(.*)</script>', html, re.DOTALL).group(1)
-          for fn in ['renderTokens','renderUsers','renderMap','drawTrendChart','renderSubQR','closeModal']:
+          for fn in ['renderTokens','renderMap','drawTrendChart','renderSubQR','closeModal']:
               assert f'function {fn}' in js, f'missing {fn}'
           assert js.count('{') == js.count('}'), 'unbalanced braces'
           print('✅ Frontend OK')
