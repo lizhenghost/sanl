@@ -31,10 +31,19 @@ jobs:
           python - <<'EOF'
           from src.api.api import create_app
           app = create_app()
-          routes = [getattr(r, 'path', '') for r in app.routes]
-          assert any('/sub/{token}/{fmt}' in p for p in routes), 'missing /sub route'
-          assert any('/api/geoip/refresh' in p for p in routes), 'missing geoip route'
-          print(f'✅ App created, {len(routes)} routes registered')
+          paths = []
+          for r in app.routes:
+              p = getattr(r, 'path', None)
+              if p: paths.append(p)
+              # FastAPI >=0.141 延迟包含的 _IncludedRouter
+              if type(r).__name__ == '_IncludedRouter':
+                  prefix = getattr(r.include_context, 'prefix', '')
+                  for sub in r.original_router.routes:
+                      sp = getattr(sub, 'path', None)
+                      if sp: paths.append(prefix + sp)
+          assert any('/sub/{token}/{fmt}' in p for p in paths), 'missing /sub route'
+          assert any('/api/geoip/refresh' in p for p in paths), 'missing geoip route'
+          print(f'✅ App created, {len(paths)} routes registered')
           EOF
 
       - name: Frontend JS check
