@@ -53,8 +53,11 @@ def create_app() -> FastAPI:
     
     # 挂载静态文件
     static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
+    vendor_dir = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "vendor")
     os.makedirs(static_dir, exist_ok=True)
+    os.makedirs(vendor_dir, exist_ok=True)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/vendor", StaticFiles(directory=vendor_dir), name="vendor")
     
     # 主页
     @app.get("/", response_class=HTMLResponse)
@@ -559,86 +562,7 @@ async def validate_token(request: Request):
     return {"valid": False}
 
 
-# ===== Phase 2: 多用户系统 =====
-
-class UserRegister(BaseModel):
-    username: str
-    password: str
-
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-
-@api_router.post("/auth/register")
-async def register_user(user_data: UserRegister):
-    """注册新用户"""
-    from ..auth import hash_password
-    if len(user_data.username) < 2:
-        raise HTTPException(status_code=400, detail="Username too short")
-    if len(user_data.password) < 6:
-        raise HTTPException(status_code=400, detail="Password too short (min 6 chars)")
-
-    user = repository.create_user(
-        username=user_data.username,
-        password_hash=hash_password(user_data.password),
-        role="user"
-    )
-    if not user:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    return {"id": user.id, "username": user.username, "role": user.role}
-
-
-@api_router.post("/auth/login")
-async def login_user(user_data: UserLogin):
-    """用户登录"""
-    from ..auth import verify_password, generate_token
-    user = repository.get_user_by_username(user_data.username)
-    if not user or not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account disabled")
-
-    # 登录成功，生成临时会话 token
-    session_token = "sess_" + __import__('secrets').token_hex(24)
-    repository.create_token(
-        user_id=user.id,
-        token_str=session_token,
-        name="session",
-        permissions="read"
-    )
-    return {
-        "id": user.id,
-        "username": user.username,
-        "role": user.role,
-        "token": session_token
-    }
-
-
-@api_router.get("/users")
-async def list_users():
-    """列出所有用户"""
-    return repository.list_users()
-
-
-@api_router.put("/users/{user_id}/role")
-async def change_user_role(user_id: int, role: str = "user"):
-    """修改用户角色"""
-    if role not in ("user", "admin"):
-        raise HTTPException(status_code=400, detail="Invalid role")
-    repository.update_user_role(user_id, role)
-    return {"status": "ok"}
-
-
-@api_router.put("/users/{user_id}/toggle")
-async def toggle_user(user_id: int, is_active: bool = True):
-    """启用/禁用用户"""
-    repository.toggle_user_active(user_id, 1 if is_active else 0)
-    return {"status": "ok"}
-
-
-# ===== Phase 2: 世界地图数据 =====
+# ===== 世界地图数据 =====
 
 @api_router.get("/map")
 async def get_map_data():

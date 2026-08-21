@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NodePool - 节点池聚合平台</title>
     <script src="/vendor/echarts.min.js?v=5.4.3"></script>
-    <script src="/vendor/qrcode.min.js?v=1.0.0"></script>
+    <script src="/vendor/qrcode.min.js?v=1.0.0" defer></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
@@ -113,7 +113,6 @@
                 <div class="nav-item" data-page="check">⚡ 测速任务</div>
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
-                <div class="nav-item" data-page="users">👥 用户管理</div>
             </nav>
             <div class="sidebar-footer">
                 <div id="last-check">最近检查: --</div>
@@ -162,7 +161,6 @@
                 case 'check': renderCheck(main); break;
                 case 'subscribe': renderSubscribe(main); break;
                 case 'tokens': renderTokens(main); break;
-                case 'users': renderUsers(main); break;
             }
         }
 
@@ -984,69 +982,6 @@
             await fetch(`${API}/tokens/${id}`, {method:'DELETE'});
             showToast('已删除');
             loadTokens();
-        }
-
-        // ===== 用户管理 =====
-        function renderUsers(main) {
-            main.innerHTML = `
-                <div class="page-header"><h1 class="page-title">👥 用户管理</h1>
-                    <button class="btn btn-primary" onclick="showRegisterModal()">➕ 注册用户</button>
-                </div>
-                <div class="table-container"><table><thead><tr>
-                    <th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th>
-                </tr></thead><tbody id="users-tbody"></tbody></table></div>
-            `;
-            loadUsers();
-        }
-
-        async function loadUsers() {
-            try {
-                const users = await (await fetch(`${API}/users`)).json();
-                const tbody = document.getElementById('users-tbody');
-                if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">👥</div>暂无用户，注册第一个用户吧</td></tr>'; return; }
-                tbody.innerHTML = users.map(u => `
-                    <tr><td>#${u.id}</td><td>${u.username}</td>
-                        <td><span class="badge ${u.role === 'admin' ? 'badge-danger' : 'badge-info'}">${u.role}</span></td>
-                        <td><span class="badge ${u.is_active ? 'badge-success' : 'badge-warning'}">${u.is_active ? '正常' : '禁用'}</span></td>
-                        <td>${u.created_at ? new Date(u.created_at*1000).toLocaleString() : '--'}</td>
-                        <td>
-                            <button class="btn btn-sm btn-secondary" onclick="changeRole(${u.id},'${u.role === 'admin' ? 'user' : 'admin'}')">设为${u.role === 'admin' ? '用户' : '管理员'}</button>
-                            <button class="btn btn-sm ${u.is_active ? 'btn-danger' : 'btn-primary'}" onclick="toggleUser(${u.id},${!u.is_active})">${u.is_active ? '禁用' : '启用'}</button>
-                        </td></tr>
-                `).join('');
-            } catch(e) { console.error(e); }
-        }
-
-        function showRegisterModal() {
-            document.getElementById('modal-overlay').classList.add('show');
-            document.getElementById('modal-content').innerHTML = `
-                <div class="modal-header"><h2 class="modal-title">➕ 注册用户</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
-                <div class="form-group"><label class="form-label">用户名</label><input class="form-input" id="reg-username" placeholder="至少 2 个字符"></div>
-                <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="reg-password" type="password" placeholder="至少 6 个字符"></div>
-                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doRegister()">注册</button></div>
-            `;
-        }
-
-        async function doRegister() {
-            const username = document.getElementById('reg-username').value;
-            const password = document.getElementById('reg-password').value;
-            if (!username || !password) { showToast('请填写完整信息', 'error'); return; }
-            try {
-                const res = await fetch(`${API}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username, password})});
-                if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '注册失败'); }
-                closeModal(); showToast('注册成功'); loadUsers();
-            } catch(e) { showToast(e.message, 'error'); }
-        }
-
-        async function changeRole(id, role) {
-            await fetch(`${API}/users/${id}/role?role=${role}`, {method:'PUT'});
-            showToast('角色已更新为 ' + role);
-            loadUsers();
-        }
-        async function toggleUser(id, active) {
-            await fetch(`${API}/users/${id}/toggle?is_active=${active}`, {method:'PUT'});
-            showToast(active ? '已启用' : '已禁用');
-            loadUsers();
         }
 
         // ===== 初始化 =====
