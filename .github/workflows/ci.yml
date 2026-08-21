@@ -31,7 +31,7 @@ jobs:
           python - <<'EOF'
           from src.api.api import create_app
           app = create_app()
-          routes = [r.path for r in app.routes]
+          routes = [getattr(r, 'path', '') for r in app.routes]
           assert any('/sub/{token}/{fmt}' in p for p in routes), 'missing /sub route'
           assert any('/api/geoip/refresh' in p for p in routes), 'missing geoip route'
           print(f'✅ App created, {len(routes)} routes registered')
