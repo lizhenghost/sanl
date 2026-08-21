@@ -12,3 +12,4 @@ output/
 config/subs-check.yaml*_TODO.md
 subs-check
 subs-check-*
+logs/

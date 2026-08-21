@@ -71,17 +71,29 @@ class Checker:
         with open(self.config_path, 'r') as f:
             config = yaml.safe_load(f) or {}
 
-        config['sub-urls'] = [src.url for src in sources]
+        # 过滤掉 manual:// 协议源（subs-check 不支持该协议，会重试3次报错浪费时间）
+        config['sub-urls'] = [src.url for src in sources if not src.url.startswith('manual://')]
 
         with open(self.config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
-        logger.info(f"Updated subs-check config with {len(sources)} sources")
+        logger.info(f"Updated subs-check config with {len(config['sub-urls'])} remote sources")
 
     async def _run_subs_check(self) -> Dict:
         """运行 subs-check（后台运行，轮询输出文件，因为 subs-check 作为守护进程不会自动退出）"""
         try:
             os.makedirs(self.output_dir, exist_ok=True)
+
+            # 关键：删除上一轮的旧结果文件，否则轮询会立即误判"已完成"并读旧数据
+            result_file = os.path.join(self.output_dir, "all.yaml")
+            for stale in (result_file, os.path.join(self.output_dir, "result", "all.yaml")):
+                try:
+                    if os.path.exists(stale):
+                        os.remove(stale)
+                        logger.info(f"Removed stale result file: {stale}")
+                except OSError:
+                    pass
+            start_ts = time.time()
 
             # 启动 subs-check，日志重定向到文件
             process = await asyncio.create_subprocess_exec(
@@ -92,7 +104,6 @@ class Checker:
                 cwd=os.path.dirname(os.path.abspath(self.binary_path))
             )
 
-            result_file = os.path.join(self.output_dir, "all.yaml")
             max_wait = 5400  # 90 分钟
             waited = 0
             poll_interval = 30
@@ -104,7 +115,9 @@ class Checker:
                 if process.returncode is not None:
                     break
 
-                if os.path.exists(result_file) and os.path.getsize(result_file) > 0:
+                # 只认本轮启动之后新写入的结果文件（mtime > start_ts）
+                if (os.path.exists(result_file) and os.path.getsize(result_file) > 0
+                        and os.path.getmtime(result_file) > start_ts):
                     # 等 60 秒确保写入完成
                     await asyncio.sleep(60)
                     process.kill()

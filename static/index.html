@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NodePool - 节点池聚合平台</title>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="/vendor/echarts.min.js?v=5.4.3"></script>
+    <script src="/vendor/qrcode.min.js?v=1.0.0"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
@@ -359,6 +359,21 @@
 
         // ===== 世界地图 =====
         let mapChart = null;
+        let worldMapReady = null;  // 缓存 registerMap Promise，避免重复加载
+
+        // 本地加载世界地图 GeoJSON 并注册到 ECharts（ECharts 5 不内置地图）
+        function ensureWorldMap() {
+            if (typeof echarts === 'undefined') {
+                return Promise.reject(new Error('echarts 未加载'));
+            }
+            if (echarts.getMap && echarts.getMap('world')) return Promise.resolve(true);
+            if (worldMapReady) return worldMapReady;
+            worldMapReady = fetch('/vendor/world.json?v=1')
+                .then(r => { if (!r.ok) throw new Error('world.json HTTP ' + r.status); return r.json(); })
+                .then(geo => { echarts.registerMap('world', geo); return true; })
+                .catch(e => { worldMapReady = null; throw e; });
+            return worldMapReady;
+        }
 
         function renderMap(main) {
             main.innerHTML = `
@@ -400,25 +415,39 @@
                     <div class="stat-card"><div class="stat-value" style="color:#38bdf8;">${stats.total||0}</div><div class="stat-label">总节点</div></div>
                 `;
 
-                // 世界地图散点图
+                // 世界地图散点图（先确保本地 GeoJSON 注册成功，失败则降级为纯散点）
                 if (mapChart) mapChart.dispose();
                 mapChart = echarts.init(document.getElementById('chart-world'));
                 const scatterData = mapData.scatter && mapData.scatter.length > 0 ? mapData.scatter :
                     countries.map(c => ({name: c.name, value: [c.lng, c.lat, c.count]}));
 
-                mapChart.setOption({
+                let worldOk = false;
+                try { worldOk = await ensureWorldMap(); } catch(e) { console.warn('世界地图底图加载失败:', e); }
+
+                const mapOption = {
                     tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>节点数: ${p.value[2]}` },
-                    geo: { map: 'world', roam: true, zoom: 1.2, left: 0, right: 0,
-                        label: { show: false }, itemStyle: { areaColor: '#1e293b', borderColor: '#334155' },
-                        emphasis: { itemStyle: { areaColor: '#0ea5e9' } } },
                     series: [{
-                        type: 'scatter', coordinateSystem: 'geo',
+                        type: 'scatter', coordinateSystem: worldOk ? 'geo' : 'cartesian2d',
                         data: scatterData.map(d => ({name: d.name, value: [d.value[0]||d.lng, d.value[1]||d.lat, d.value[2]||d.count]})),
                         symbolSize: v => Math.max(5, Math.min(30, v[2] * 3)),
                         itemStyle: { color: '#38bdf8', opacity: 0.7 },
-                        encode: { value: 2 }
+                        encode: { value: 2 },
+                        label: worldOk ? {} : { show: true, formatter: p => p.name, position: 'right', color: '#e2e8f0', fontSize: 10 }
                     }]
-                });
+                };
+                if (worldOk) {
+                    mapOption.geo = { map: 'world', roam: true, zoom: 1.2, left: 0, right: 0,
+                        label: { show: false }, itemStyle: { areaColor: '#1e293b', borderColor: '#334155' },
+                        emphasis: { itemStyle: { areaColor: '#0ea5e9' } } };
+                } else {
+                    // 降级：无底图时用经纬度直角坐标系展示散点
+                    mapOption.xAxis = { type: 'value', min: -180, max: 180, show: false };
+                    mapOption.yAxis = { type: 'value', min: -60, max: 85, show: false };
+                    mapOption.grid = { left: 10, right: 10, top: 10, bottom: 10 };
+                    mapOption.series[0].data = mapOption.series[0].data.map(d =>
+                        ({ name: d.name, value: [d.value[0], d.value[1], d.value[2]] }));
+                }
+                mapChart.setOption(mapOption);
 
                 // 国家柱状图
                 const top10 = countries.slice(0, 15);
@@ -466,9 +495,12 @@
                         <h3 style="margin-bottom:12px;">🖱 手动录入单个节点</h3>
                         <div class="flex" style="flex-wrap:wrap;gap:10px;">
                             <select class="form-input" style="width:130px;" id="imp-single-type">
-                                <option value="ss">SS</option><option value="vmess">VMess</option>
+                                <option value="ss">SS</option><option value="ssr">SSR</option>
+                                <option value="vmess">VMess</option>
                                 <option value="vless">VLESS</option><option value="trojan">Trojan</option>
                                 <option value="hysteria2">Hysteria2</option><option value="tuic">TUIC</option>
+                                <option value="socks5">SOCKS5</option><option value="http">HTTP代理</option>
+                                <option value="snell">Snell</option><option value="wireguard">WireGuard</option>
                             </select>
                             <input class="form-input" style="width:180px;" id="imp-single-server" placeholder="服务器地址/IP">
                             <input class="form-input" style="width:90px;" id="imp-single-port" placeholder="端口" type="number">
@@ -476,6 +508,7 @@
                             <input class="form-input" style="width:150px;" id="imp-single-cipher" placeholder="加密方式(SS)">
                             <input class="form-input" style="width:150px;" id="imp-single-sni" placeholder="SNI（可选）">
                             <input class="form-input" style="width:150px;" id="imp-single-name" placeholder="节点名称（可选）">
+                            <input class="form-input" style="width:200px;" id="imp-single-extra" placeholder='扩展参数JSON：{"public_key":"…","private_key":"…"}'>
                         </div>
                         <div class="flex mt-4" style="align-items:center;">
                             <button class="btn btn-primary" onclick="importSingleNode()">💾 保存节点</button>
@@ -490,7 +523,7 @@
         let sourcesTab = 'list';
         function switchSourcesTab(tab) {
             sourcesTab = tab;
-            const page = document.getElementById('page-content');
+            const page = document.getElementById('main-content');
             if (page) renderSources(page);
         }
 
@@ -530,13 +563,29 @@
         async function importSingleNode() {
             const g = id => document.getElementById(id).value.trim();
             const out = document.getElementById('imp-single-result');
-            const body = {
-                type: g('imp-single-type'), server: g('imp-single-server'),
+            const type = g('imp-single-type');
+            const secret = g('imp-single-secret') || null;
+            // 按协议把 secret 映射到正确字段名
+            let body = {
+                type, server: g('imp-single-server'),
                 port: parseInt(g('imp-single-port')) || 0,
-                password: g('imp-single-secret') || null, uuid: g('imp-single-secret') || null,
+                password: secret, uuid: secret,
                 cipher: g('imp-single-cipher') || null, sni: g('imp-single-sni') || null,
                 name: g('imp-single-name') || null
             };
+            // 合并扩展参数 JSON（承载 wireguard 的 public_key/private_key 等）
+            const extraRaw = g('imp-single-extra');
+            if (extraRaw) {
+                try { Object.assign(body, JSON.parse(extraRaw)); }
+                catch(e) { return showToast('扩展参数 JSON 格式错误', 'error'); }
+            }
+            // 按类型裁剪无用字段，避免后端困惑
+            const NEED_UUID = ['vmess','vless','tuic'];
+            const NEED_PWD = ['ss','trojan','hysteria2','hy2','snell'];
+            if (!NEED_UUID.includes(type)) delete body.uuid;
+            if (!NEED_PWD.includes(type) && !['socks5','http','ssr','wireguard','hysteria'].includes(type)) delete body.password;
+            if (type === 'wireguard') { delete body.password; delete body.uuid; }
+            if (type === 'hysteria') { delete body.uuid; }
             if (!body.server || !body.port) return showToast('请填服务器和端口', 'error');
             try {
                 const res = await fetch(`${API}/nodes/import/single`, { method: 'POST', headers: {'Content-Type':'application/json'},
@@ -549,12 +598,13 @@
 
         async function loadSources() {
             try {
-                const [sources, health] = await Promise.all([
+                const [sources, health, stats] = await Promise.all([
                     fetch(`${API}/sources`).then(r=>r.json()),
-                    fetch(`${API}/sources/health`).then(r=>r.json())
+                    fetch(`${API}/sources/health`).then(r=>r.json()),
+                    fetch(`${API}/nodes/stats`).then(r=>r.json())
                 ]);
                 const total = sources.length, healthy = health.filter(h => h.healthy).length;
-                const nodeCount = sources.reduce((s,src) => s + (src.node_count||0), 0);
+                const nodeCount = (stats && stats.total) || 0;  // 真实节点总数（源未关联节点时 reduce 恒为 0）
                 document.getElementById('source-health').innerHTML = `
                     <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">数据源总数</div></div>
                     <div class="stat-card"><div class="stat-value" style="color:#22c55e;">${healthy}</div><div class="stat-label">健康源</div></div>
@@ -575,7 +625,7 @@
                             <button class="btn btn-sm btn-danger" onclick="deleteSource(${s.id})">删除</button>
                         </td></tr>`;
                 }).join('');
-            } catch(e) { console.error(e); }
+            } catch(e) { console.error(e); showToast('数据源加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
         async function toggleSource(id, enabled) {
@@ -703,7 +753,7 @@
                         <td>${st}</td><td>${dur}</td>
                         <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${j.error_message || j.result || '-'}</td></tr>`;
                 }).join('');
-            } catch(e) { console.error(e); }
+            } catch(e) { console.error(e); showToast('数据源加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
         async function runCheck() {
@@ -730,6 +780,7 @@
                             <option value="v2ray">V2Ray</option>
                             <option value="singbox">Sing-box</option>
                             <option value="base64">Base64</option>
+                            <option value="txt">Txt 明文</option>
                         </select>
                         <button class="btn btn-secondary" onclick="copyAggLink()">📋 复制</button>
                         <span id="agg-count" class="text-muted" style="font-size:13px;"></span>
@@ -746,7 +797,7 @@
                                 <button class="btn btn-secondary" onclick="copyText('${location.origin}/api/nodes/subscribe?fmt=clash&src=manual')">🛠 仅手动导入</button>
                                 <button class="btn btn-secondary" onclick="copyText('${location.origin}/api/nodes/subscribe?fmt=clash&src=auto')">🤖 仅系统优选</button>
                             </div>
-                            <p class="text-muted" style="font-size:11px;margin-top:8px;">把 fmt=clash 换成 v2ray/singbox/base64 可切换格式</p>
+                            <p class="text-muted" style="font-size:11px;margin-top:8px;">把 fmt=clash 换成 v2ray/singbox/base64/txt 可切换格式</p>
                         </div>
                     </div>
                 </div>
@@ -759,6 +810,7 @@
                             <option value="v2ray">V2Ray</option>
                             <option value="singbox">Sing-box</option>
                             <option value="base64">Base64</option>
+                            <option value="txt">Txt 明文</option>
                         </select>
                     </div>
                     <div class="form-group"><label class="form-label">数量限制</label>
@@ -785,7 +837,8 @@
                                 <code style="color:#38bdf8;">/sub/&lt;token&gt;/clash</code><br>
                                 <code style="color:#38bdf8;">/sub/&lt;token&gt;/v2ray</code> ·
                                 <code style="color:#38bdf8;">/singbox</code> ·
-                                <code style="color:#38bdf8;">/base64</code><br>
+                                <code style="color:#38bdf8;">/base64</code> ·
+                                <code style="color:#38bdf8;">/txt</code><br>
                                 筛选参数：<code>?min_speed=10&max_latency=300&limit=100</code>
                             </p>
                         </div>
@@ -999,19 +1052,17 @@
         // ===== 初始化 =====
         renderPage('dashboard');
 
-        // 加载世界地图 GeoJSON 并注册
-        fetch('https://cdn.jsdelivr.net/npm/echarts@5.4.3/map/json/world.json')
-            .then(r => r.json())
-            .then(geoJson => { echarts.registerMap('world', geoJson); console.log('World map GeoJSON loaded'); })
-            .catch(e => console.error('Failed to load world GeoJSON:', e));
+        // 世界地图 GeoJSON 由 ensureWorldMap() 按需从本地 /vendor/world.json 加载（不依赖外网 CDN）
 
-        // 侧边栏状态定时刷新
-        setInterval(async () => {
+        // 侧边栏状态刷新：立即执行一次，之后每 30 秒刷新
+        async function refreshSidebarStats() {
             try {
                 const stats = await (await fetch(`${API}/nodes/stats`)).json();
                 document.getElementById('total-nodes').textContent = `总节点: ${stats.total}`;
             } catch(e) {}
-        }, 30000);
+        }
+        refreshSidebarStats();
+        setInterval(refreshSidebarStats, 30000);
     </script>
 </body>
 </html>

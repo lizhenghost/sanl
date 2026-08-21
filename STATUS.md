@@ -2,9 +2,10 @@
 
 **更新时间**: 2026-08-21 UTC
 **项目名**: sanl
-**方案版本**: v2.1（优化方案全项落地）
+**方案版本**: v2.1 + 全协议扩展（2026-08-21 本轮）
 **域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，公网 200 ✅）
-**服务**: http://127.0.0.1:8899
+**服务**: http://127.0.0.1:8899（PID 2915）
+**GitHub**: https://github.com/lizhengost/sanl（Public, tag v2.1.0）
 
 ---
 
@@ -12,12 +13,40 @@
 
 | 项目 | 状态 |
 |------|------|
-| **后端 API** | ✅ 运行中 (port 8899)，18/18 端点回归通过 |
-| **数据库** | ✅ 159 节点（active），country_code GeoIP 已回填 |
+| **后端 API** | ✅ 运行中 (PID 2915, port 8899)，14 端点回归全通 |
+| **数据库** | ✅ 134 节点（active），trojan73/vless38/hy2-15/ss5/vmess3 |
 | **测速引擎** | ✅ subs-check 定时任务正常（每小时） |
 | **公网访问** | ✅ https://lzsanlzhuanhuan.kdns.fr → 200 |
 | **评分系统** | ✅ 多维度评分（v2.1 附录H权重）+ 等级标签 |
-| **订阅短链** | ✅ /sub/{token}/{fmt} 四格式全通 |
+| **订阅短链** | ✅ /sub/{token}/{fmt} **五格式**全通（clash/v2ray/singbox/base64/txt）|
+| **全协议导入** | ✅ 12 协议：ss/ssr/vmess/vless/trojan/hy2/hysteria/tuic/socks5/http/snell/wireguard |
+| **全协议导出** | ✅ Clash 12型 / V2Ray&Base64&Txt 8型链接 / Sing-box 11型 outbound |
+
+---
+
+## ✅ 全协议兼容扩展（2026-08-21 本轮完成）
+
+### 导入侧（`src/api/importer.py`）
+- [x] 新增解析：`socks5://` `socks://` `snell://` `ssr://` `hysteria://`(v1) `wireguard://`
+- [x] HTTP 代理节点 `http://IP:port`（IP 型判别，域名型走表单/Clash，避免误判订阅 URL）
+- [x] JSON 数组导入 `[{"type","server",...}]`（与 Clash proxies 同构）
+- [x] 裸域名/`host:port#name`（CF 优选格式 → trojan 占位构造）
+- [x] `build_from_form` 表单支持全部 12 协议（含 wireguard 双密钥）
+- [x] 订阅 URL 防误判：`https://` 整段行跳过、`parse_host_port` 拒绝含 `/` `?` 的行
+
+### 导出侧（`src/api/subscribe.py` 重写）
+- [x] **Clash**：12 协议完整字段（ws/grpc/h2 传输层、REALITY、TLS、SNI、obfs、congestion 等）
+- [x] **V2Ray/Base64/Txt**：统一 `generate_links`，8 种 URI（ss/ssr/vmess/vless/trojan/hy2/hysteria/tuic/socks5/http/snell/wireguard）
+- [x] **Sing-box**：11 种 outbound（shadowsocks/shadowsocksr/vmess/vless/trojan/hysteria2/hysteria/tuic/socks/http/wireguard）
+- [x] **新增 `txt` 明文格式**（多行裸 URI，兼容不支持 Base64 的客户端）
+- [x] API 路由 `/api/nodes/subscribe` 与 `/sub/{token}/{fmt}` 均支持 `fmt=txt`
+
+### 前端（`static/index.html`）
+- [x] 手动录入类型下拉：+SOCKS5/+HTTP代理/+Snell/+SSR/+WireGuard
+- [x] 新增"扩展参数JSON"输入框（承载 wireguard public_key/private_key 等）
+- [x] `importSingleNode` 按协议智能映射 secret 字段
+- [x] 订阅格式下拉两处（聚合+短链）：+Txt 明文
+- [x] 无头浏览器渲染验证：6 协议表单提交 + 5 格式链接生成均通过，JS 无报错
 
 ---
 
@@ -85,6 +114,8 @@
 
 ## 🚀 待办（下一阶段）
 
-- [ ] GitHub 仓库创建 + push + 打 tag v2.1.0（CI 会自动跑）
+- [ ] CF 优选库方案实施：新增 `cf_endpoints` 表 + `/api/cf/endpoints` 接口 + 前端展示（裸 `ip:port#name` 独立管理，不混入节点池）
+- [ ] CF 优选源抓取链路验证（静态文件已生成 youxuan.txt/visa.txt，需确认定时抓取入库完整）
 - [ ] README 补截图（仪表盘/地图/订阅二维码）
 - [ ] 附录 G.1 GitHub 仓库发现爬虫简版
+- [ ] Sing-box `tls:{}` 空对象优化（无 TLS 参数时不输出 tls 字段）

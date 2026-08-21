@@ -249,7 +249,7 @@ async def node_stats():
 
 @api_router.get("/nodes/subscribe")
 async def get_subscribe(
-    fmt: str = Query("clash", pattern="^(clash|singbox|v2ray|base64)$"),
+    fmt: str = Query("clash", pattern="^(clash|singbox|v2ray|base64|txt)$"),
     limit: int = Query(200, le=2000),
     min_score: float = Query(0, ge=0, le=100),
     min_speed: Optional[float] = Query(None, ge=0, description="最低速度 KB/s"),
@@ -258,7 +258,7 @@ async def get_subscribe(
     src: Optional[str] = Query(None, pattern="^(manual|auto)$", description="来源筛选")
 ):
     """获取多格式订阅链接（支持 min_speed/max_latency 筛选，方案 4.3 节）"""
-    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64
+    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64, generate_txt
 
     # 获取活跃节点，按评分降序（src: manual=手动导入, auto=系统抓取, None=聚合全部）
     nodes = repository.get_ranking(
@@ -282,6 +282,7 @@ async def get_subscribe(
         "v2ray": generate_v2ray,
         "singbox": generate_singbox,
         "base64": generate_base64,
+        "txt": generate_txt,
     }
 
     content = generators[fmt](nodes)
@@ -291,6 +292,7 @@ async def get_subscribe(
         "v2ray": "text/plain; charset=utf-8",
         "singbox": "application/json; charset=utf-8",
         "base64": "text/plain; charset=utf-8",
+        "txt": "text/plain; charset=utf-8",
     }
 
     return Response(
@@ -315,9 +317,9 @@ async def subscribe_by_token(
     country: Optional[str] = Query(None),
     src: Optional[str] = Query(None, pattern="^(manual|auto)$")
 ):
-    """Token 鉴权订阅输出：/sub/np_xxx/clash?v2ray|singbox|base64
+    """Token 鉴权订阅输出：/sub/np_xxx/clash?v2ray|singbox|base64|txt
     支持筛选参数 min_speed/max_latency/src（聚合手动+系统全部节点）"""
-    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64
+    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64, generate_txt
 
     # Token 校验（无效/禁用/过期 → 401）
     info = repository.validate_token(token)
@@ -334,9 +336,10 @@ async def subscribe_by_token(
         raise HTTPException(status_code=404, detail="No nodes available")
 
     generators = {"clash": generate_clash, "v2ray": generate_v2ray,
-                  "singbox": generate_singbox, "base64": generate_base64}
+                  "singbox": generate_singbox, "base64": generate_base64,
+                  "txt": generate_txt}
     if fmt not in generators:
-        raise HTTPException(status_code=400, detail="fmt must be clash|v2ray|singbox|base64")
+        raise HTTPException(status_code=400, detail="fmt must be clash|v2ray|singbox|base64|txt")
 
     return Response(
         content=generators[fmt](nodes),
@@ -430,23 +433,38 @@ async def fetch_single_source(source_id: int, trigger_check: bool = False):
     if not source.enabled:
         raise HTTPException(status_code=400, detail="Source is disabled")
 
-    import httpx
+    from ..scraper.scraper import Scraper
+    scraper = Scraper()
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            resp = await client.get(source.url, headers={"User-Agent": "Mozilla/5.0 NodePool/2.0"})
-        ok = resp.status_code == 200 and len(resp.text) > 50
-        if ok:
-            repository.record_source_success(source_id)
-            repository.update_source_status(source_id, 0)
-            result = {"status": "ok", "http": resp.status_code, "size": len(resp.text)}
+        fetched = await scraper.fetch_all()
+        target = next((s for s in fetched if s.url == source.url or s.name == source.name), None)
+        if not target:
+            target = next((s for s in fetched if source.url in s.url or s.url in source.url), None)
+        
+        if target and target.raw_content:
+            ok = len(target.raw_content) > 50
+            if ok:
+                repository.record_source_success(source_id)
+                from .importer import parse_content
+                parsed_count = len(parse_content(target.raw_content).get("nodes", []))
+                repository.update_source_status(source_id, 0, parsed_count)
+                result = {"status": "ok", "size": len(target.raw_content), "nodes": parsed_count}
+            else:
+                repository.record_source_failure(source_id)
+                result = {"status": "unhealthy", "error": "empty content"}
+        elif target and target.error:
+            repository.record_source_failure(source_id)
+            result = {"status": "failed", "error": target.error[:200]}
         else:
             repository.record_source_failure(source_id)
-            result = {"status": "unhealthy", "http": resp.status_code}
+            result = {"status": "failed", "error": "source not found in scraper"}
     except Exception as e:
         repository.record_source_failure(source_id)
         result = {"status": "failed", "error": str(e)[:200]}
+    finally:
+        await scraper.close()
 
-    if trigger_check and result["status"] == "ok":
+    if trigger_check and result.get("status") == "ok":
         import asyncio
         asyncio.create_task(scheduler.checker.run_check())
         result["check_triggered"] = True
@@ -666,6 +684,53 @@ PRESET_SOURCES = [
     {"name": "zlccccc/ProxyPool", "url": "https://raw.githubusercontent.com/zlccccc/ProxyPool/main/sub/sub_merge.txt", "type": "github"},
     {"name": "aiboboxx/clashfree", "url": "https://raw.githubusercontent.com/aiboboxx/clashfree/main/clash.yml", "type": "github"},
     {"name": "huyz2023/free-proxy", "url": "https://raw.githubusercontent.com/huyz2023/free-proxy/main/sub.txt", "type": "github"},
+    {"name": "LancelotRar/best-cf-ipv4", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "type": "github"},
+    {"name": "LancelotRar/best-cf-domain", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-domain.txt", "type": "github"},
+    {"name": "BestCF-CMCC", "url": "https://090227.pages.dev/bestcf?isp=cmcc&ips=100", "type": "http"},
+    {"name": "BestCF-US", "url": "https://bestcf.pages.dev/random-region/US/all.txt", "type": "http"},
+    {"name": "BestCF-JP", "url": "https://bestcf.pages.dev/random-region/JP/all.txt", "type": "http"},
+    {"name": "BestCF-TW", "url": "https://bestcf.pages.dev/random-region/TW/all.txt", "type": "http"},
+    {"name": "BestCF-HK", "url": "https://bestcf.pages.dev/random-region/HK/all.txt", "type": "http"},
+    {"name": "BestCF-MO", "url": "https://bestcf.pages.dev/random-region/MO/all.txt", "type": "http"},
+    {"name": "BestCF-RU", "url": "https://bestcf.pages.dev/random-region/RU/all.txt", "type": "http"},
+    {"name": "CF-090227-8ips", "url": "https://cf.090227.xyz/cmcc?ips=8", "type": "http"},
+    {"name": "static-youxuan", "url": "data:static/youxuan.txt", "type": "static"},
+    {"name": "static-visa", "url": "data:static/visa.txt", "type": "static"},
+    {"name": "static-shopify", "url": "data:static/shopify.txt", "type": "static"},
+    {"name": "static-ubi", "url": "data:static/ubi.txt", "type": "static"},
+    {"name": "static-nexusmods", "url": "data:static/nexusmods.txt", "type": "static"},
+    {"name": "static-timeis", "url": "data:static/timeis.txt", "type": "static"},
+    {"name": "static-icook", "url": "data:static/icook.txt", "type": "static"},
+    {"name": "static-bestcf-mingyu", "url": "data:static/bestcf_mingyu.txt", "type": "static"},
+    {"name": "static-cdn-2020111", "url": "data:static/cdn_2020111.txt", "type": "static"},
+    {"name": "static-cfip-1323123", "url": "data:static/cfip_1323123.txt", "type": "static"},
+    {"name": "static-cfip-cfcdn", "url": "data:static/cfip_cfcdn.txt", "type": "static"},
+    {"name": "static-cloudflare-182682", "url": "data:static/cloudflare_182682.txt", "type": "static"},
+    {"name": "static-cloudflare-dl", "url": "data:static/cloudflare_dl.txt", "type": "static"},
+    {"name": "static-cloudflare-ip", "url": "data:static/cloudflare_ip.txt", "type": "static"},
+    {"name": "static-fn-130519", "url": "data:static/fn_130519.txt", "type": "static"},
+    {"name": "static-freeyx", "url": "data:static/freeyx.txt", "type": "static"},
+    {"name": "static-nrt", "url": "data:static/nrt.txt", "type": "static"},
+    {"name": "static-nrtcfdns", "url": "data:static/nrtcfdns.txt", "type": "static"},
+    {"name": "static-saas", "url": "data:static/saas.txt", "type": "static"},
+    {"name": "static-tencentapp", "url": "data:static/tencentapp.txt", "type": "static"},
+    {"name": "static-cf3666888", "url": "data:static/cf_3666888.txt", "type": "static"},
+    {"name": "static-blogluo", "url": "data:static/blogluo.txt", "type": "static"},
+    {"name": "static-eteaf", "url": "data:static/eteaf.txt", "type": "static"},
+    {"name": "static-1cf", "url": "data:static/1cf.txt", "type": "static"},
+    {"name": "static-cf1s", "url": "data:static/cf1s.txt", "type": "static"},
+    {"name": "static-avido", "url": "data:static/avido.txt", "type": "static"},
+    {"name": "static-cdncf", "url": "data:static/cdncf.txt", "type": "static"},
+    {"name": "static-youxuan2", "url": "data:static/youxuan2.txt", "type": "static"},
+    {"name": "static-uac", "url": "data:static/uac.txt", "type": "static"},
+    {"name": "static-mfyx", "url": "data:static/mfyx.txt", "type": "static"},
+    {"name": "static-cdn7zz", "url": "data:static/cdn7zz.txt", "type": "static"},
+    {"name": "static-cdn204910", "url": "data:static/cdn204910.txt", "type": "static"},
+    {"name": "static-qocu", "url": "data:static/qocu.txt", "type": "static"},
+    {"name": "static-cf123", "url": "data:static/cf123.txt", "type": "static"},
+    {"name": "static-cfvip", "url": "data:static/cfvip.txt", "type": "static"},
+    {"name": "static-4cf", "url": "data:static/4cf.txt", "type": "static"},
+    {"name": "static-777ai", "url": "data:static/777ai.txt", "type": "static"},
 ]
 
 

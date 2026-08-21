@@ -1,10 +1,10 @@
 """
 免费节点源抓取器
-支持：GitHub Raw、Telegram 频道、静态 JSON
+支持：GitHub Raw、通用 HTTP、静态文件、Telegram 频道、静态 JSON
 """
 import re
 import json
-import asyncio
+import os
 import logging
 from typing import List, Optional
 from dataclasses import dataclass
@@ -13,19 +13,15 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# GitHub 订阅链接模式
-GITHUB_SUB_PATTERN = re.compile(
-    r'https?://raw\.githubusercontent\.com/[^/]+/[^/]+/refs/heads/[^/]+/[^/\s]+\.txt'
-)
-
 # 常见订阅协议前缀
 SUB_PROTOCOLS = [
-    'vmess://', 'vless://', 'ss://', 'trojan://', ' hysteria2://',
-    'hysteria2://', 'snell://', 'socks5://', 'http://', 'https://',
+    'vmess://', 'vless://', 'ss://', 'trojan://', 'hysteria2://',
+    'hy2://', 'snell://', 'socks5://', 'http://', 'https://',
 ]
 
 # 静态数据源文件路径
-STATIC_SOURCES_FILE = "data/sources.json"
+STATIC_SOURCES_FILE = "presets/free_sources.json"
+STATIC_DIR = "data/static"
 
 
 @dataclass
@@ -50,57 +46,69 @@ class Scraper:
     async def fetch_github_raw(self, repo_url: str) -> Optional[FetchedSource]:
         """从 GitHub raw URL 获取订阅内容"""
         try:
-            # 标准化 URL
-            if "github.com" in repo_url and "/raw/" in repo_url:
-                url = repo_url
-            elif "gist.github.com" in repo_url:
-                # Gist raw URL
-                url = repo_url.replace("gist.github.com", "gist.githubusercontent.com").replace("/view", "/raw")
-            else:
-                # 尝试解析为 raw URL
+            url = repo_url
+            if "github.com" in repo_url and "/raw/" not in repo_url:
                 match = re.search(r'github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)', repo_url)
                 if match:
                     user, repo, branch, path = match.groups()
                     url = f"https://raw.githubusercontent.com/{user}/{repo}/refs/heads/{branch}/{path}"
-                else:
-                    url = repo_url
 
             logger.info(f"Fetching GitHub source: {url}")
             resp = await self.client.get(url)
             resp.raise_for_status()
             content = resp.text.strip()
 
-            # 提取订阅链接
-            lines = content.split('\n')
-            subs = []
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                # 检查是否是订阅链接
-                if any(line.startswith(p) for p in SUB_PROTOCOLS):
-                    subs.append(line)
-                elif line.startswith('http') and ('sub' in line or 'list' in line or '.txt' in line):
-                    subs.append(line)
-
-            name = url.split('/')[-1].replace('.txt', '') or f"GitHub-{url.split('/')[-2]}"
+            name = url.split('/')[-1].replace('.txt', '').replace('.yaml', '').replace('.yml', '') or f"GitHub-{url.split('/')[-2]}"
             return FetchedSource(name=name, url=url, raw_content=content)
 
         except Exception as e:
             logger.error(f"Failed to fetch GitHub source {repo_url}: {e}")
             return FetchedSource(name=repo_url, url=repo_url, error=str(e))
 
+    async def fetch_http(self, url: str) -> Optional[FetchedSource]:
+        """从通用 HTTP URL 获取订阅内容"""
+        try:
+            logger.info(f"Fetching HTTP source: {url}")
+            resp = await self.client.get(url)
+            resp.raise_for_status()
+            content = resp.text.strip()
+
+            name = url.split('/')[-1].split('?')[0] or f"HTTP-{url[:30]}"
+            return FetchedSource(name=name, url=url, raw_content=content)
+
+        except Exception as e:
+            logger.error(f"Failed to fetch HTTP source {url}: {e}")
+            return FetchedSource(name=url, url=url, error=str(e))
+
+    async def fetch_static_file(self, url: str) -> Optional[FetchedSource]:
+        """从本地 static 文件读取（url 格式: data:static/xxx.txt）"""
+        try:
+            if not url.startswith("data:"):
+                raise ValueError("static url must start with data:")
+            rel_path = url[5:]
+            # 实际存储路径统一为 data/static/xxx.txt
+            actual_path = f"data/static/{os.path.basename(rel_path)}"
+            if not os.path.exists(actual_path):
+                raise FileNotFoundError(actual_path)
+            with open(actual_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+
+            name = os.path.basename(actual_path).replace('.txt', '')
+            return FetchedSource(name=name, url=url, raw_content=content)
+
+        except Exception as e:
+            logger.error(f"Failed to load static source {url}: {e}")
+            return FetchedSource(name=url, url=url, error=str(e))
+
     async def fetch_telegram_channel(self, channel_url: str) -> Optional[FetchedSource]:
         """从 Telegram 频道获取订阅（通过 t.me 预览）"""
         try:
-            # Telegram 公共频道消息预览
             preview_url = f"https://t.me/s/{channel_url.replace('@', '').strip('/')}"
             logger.info(f"Fetching Telegram channel: {preview_url}")
             resp = await self.client.get(preview_url, timeout=15.0)
             resp.raise_for_status()
             content = resp.text
 
-            # 提取订阅链接
             subs = re.findall(r'(https?://[^\s"<>\']+)', content)
             valid_subs = [s for s in subs if any(s.startswith(p) for p in SUB_PROTOCOLS)]
 
@@ -121,12 +129,26 @@ class Scraper:
 
             results = []
             for src in sources:
-                if isinstance(src, dict):
-                    results.append(FetchedSource(
-                        name=src.get("name", "Unknown"),
-                        url=src.get("url", ""),
-                        raw_content=json.dumps(src)
-                    ))
+                if not isinstance(src, dict):
+                    continue
+                stype = str(src.get("type", "")).lower().strip()
+                url = src.get("url", "")
+                name = src.get("name", "Unknown")
+
+                if stype == "github":
+                    r = await self.fetch_github_raw(url)
+                elif stype == "http":
+                    r = await self.fetch_http(url)
+                elif stype == "static":
+                    r = await self.fetch_static_file(url)
+                elif stype == "telegram":
+                    r = await self.fetch_telegram_channel(url)
+                else:
+                    r = FetchedSource(name=name, url=url, error=f"Unsupported type: {stype}")
+
+                if r:
+                    r.name = name
+                    results.append(r)
             return results
         except Exception as e:
             logger.error(f"Failed to load static sources from {json_path}: {e}")
@@ -134,24 +156,7 @@ class Scraper:
 
     async def fetch_all(self) -> List[FetchedSource]:
         """获取所有数据源"""
-        results = []
-        
-        # 1. 静态 JSON
-        static_sources = await self.fetch_static_json()
-        results.extend(static_sources)
-        
-        # 2. GitHub 源（使用已知列表）
-        github_urls = [
-            "https://raw.githubusercontent.com/chengdoudou/free-node/main/clash.txt",
-            "https://raw.githubusercontent.com/pepslsub/free/main/sub",
-            "https://raw.githubusercontent.com/mai-gitp/sub/main/clash.sub",
-            "https://raw.githubusercontent.com/Royaclead/Sub/main/Clash.meta.sub",
-        ]
-        for url in github_urls:
-            result = await self.fetch_github_raw(url)
-            results.append(result)
-        
-        return results
+        return await self.fetch_static_json()
 
     async def close(self):
         await self.client.aclose()

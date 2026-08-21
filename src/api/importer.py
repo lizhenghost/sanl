@@ -17,7 +17,11 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PREFIXES = ("ss://", "vmess://", "vless://", "trojan://", "hysteria2://", "hy2://", "tuic://")
+SUPPORTED_PREFIXES = (
+    "ss://", "vmess://", "vless://", "trojan://", "hysteria2://",
+    "hy2://", "tuic://", "socks5://", "socks://", "snell://",
+    "ssr://", "hysteria://", "wireguard://",
+)
 
 
 def _b64decode(s: str) -> bytes:
@@ -194,11 +198,193 @@ def parse_tuic(uri: str) -> Tuple[str, dict, str]:
     return "tuic", data, _safe_name(frag, f"TUIC-{host}")
 
 
+def parse_socks5(uri: str) -> Tuple[str, dict, str]:
+    """socks5://[user:pass@]host:port#name"""
+    body = uri.split("://", 1)[1]
+    frag = ""
+    if "#" in body:
+        body, frag = body.split("#", 1)
+    userinfo, hostport = (body.rsplit("@", 1) if "@" in body else (None, body))
+    host, port = hostport.rsplit(":", 1)
+    data = {"server": host.strip("[]"), "port": int(port), "udp": True}
+    if userinfo:
+        u, _, p = userinfo.partition(":")
+        if u: data["username"] = unquote(u)
+        if p: data["password"] = unquote(p)
+    return "socks5", data, _safe_name(frag, f"SOCKS5-{host}")
+
+
+def parse_http_proxy(uri: str) -> Tuple[str, dict, str]:
+    """http://[user:pass@]host:port#name（HTTP 代理节点，host 必须是 IP 以避免误判订阅 URL）"""
+    from urllib.parse import urlsplit
+    u = urlsplit(uri)
+    host = u.hostname or ""
+    if not _is_ipv4(host):
+        raise ValueError("http 代理节点 host 必须为 IP（域名型请用表单或 Clash 导入）")
+    port = u.port or 80
+    data = {"server": host, "port": port, "udp": False}
+    if u.username: data["username"] = unquote(u.username)
+    if u.password: data["password"] = unquote(u.password)
+    frag = uri.split("#", 1)[1] if "#" in uri else ""
+    return "http", data, _safe_name(frag, f"HTTP-{host}")
+
+
+def parse_snell(uri: str) -> Tuple[str, dict, str]:
+    """snell://password@host:port?psk=xxx&obfs=http#name"""
+    body = uri[8:]
+    frag = ""
+    if "#" in body:
+        body, frag = body.split("#", 1)
+    qs = ""
+    if "?" in body:
+        body, qs = body.split("?", 1)
+    userinfo, hostport = body.rsplit("@", 1)
+    host, port = hostport.rsplit(":", 1)
+    data = {
+        "server": host.strip("[]"), "port": int(port),
+        "password": unquote(userinfo), "udp": True,
+    }
+    q = {k: v[0] for k, v in parse_qs(qs).items() if v}
+    if q.get("psk"): data["psk"] = q["psk"]
+    if q.get("obfs"): data["obfs"] = q["obfs"]
+    return "snell", data, _safe_name(frag, f"Snell-{host}")
+
+
+def parse_ssr(uri: str) -> Tuple[str, dict, str]:
+    """ssr://base64(host:port:proto:method:obfs:base64pass/?params)#name"""
+    body = uri[6:]
+    frag = ""
+    if "#" in body:
+        body, frag = body.split("#", 1)
+    decoded = _b64decode(body).decode("utf-8", "ignore")
+    m = re.match(r'^([^:]+):(\d+):([^:]+):([^:]+):([^:]+):([^:]+?)(?:/\?(.*))?$', decoded)
+    if not m:
+        raise ValueError("ssr 链接格式错误")
+    host, port, proto, method, obfs, pwd_b64, param_s = m.groups()
+    try:
+        password = _b64decode(pwd_b64).decode("utf-8", "ignore")
+    except Exception:
+        password = pwd_b64
+    data = {
+        "server": host.strip("[]"), "port": int(port),
+        "protocol": proto, "cipher": method, "obfs": obfs,
+        "password": password, "udp": True,
+    }
+    if param_s:
+        q = {k: v[0] for k, v in parse_qs(param_s).items() if v}
+        if q.get("obfsparam"):
+            data["obfs-param"] = _b64decode(q["obfsparam"]).decode("utf-8", "ignore")
+        if q.get("protoparam"):
+            data["protocol-param"] = _b64decode(q["protoparam"]).decode("utf-8", "ignore")
+        if q.get("remarks"):
+            frag = _b64decode(q["remarks"]).decode("utf-8", "ignore")
+        if q.get("group"):
+            data["group"] = _b64decode(q["group"]).decode("utf-8", "ignore")
+    return "ssr", data, _safe_name(frag, f"SSR-{host}")
+
+
+def parse_hysteria(uri: str) -> Tuple[str, dict, str]:
+    """hysteria://host:port?protocol=udp&auth=xxx&upmbps=10&downmbps=50&insecure=1#name（Hy v1）"""
+    body = uri.split("://", 1)[1]
+    frag = ""
+    if "#" in body:
+        body, frag = body.split("#", 1)
+    qs = ""
+    if "?" in body:
+        body, qs = body.split("?", 1)
+    host, port = body.rsplit(":", 1)
+    data = {"server": host.strip("[]"), "port": int(port), "udp": True}
+    q = {k: v[0] for k, v in parse_qs(qs).items() if v}
+    if q.get("auth"): data["auth-str"] = q["auth"]
+    if q.get("upmbps"): data["up-speed"] = int(q["upmbps"])
+    if q.get("downmbps"): data["down-speed"] = int(q["downmbps"])
+    if q.get("protocol"): data["protocol"] = q["protocol"]
+    if q.get("insecure") in ("1", "true", "yes"): data["skip-cert-verify"] = True
+    if q.get("sni"): data["sni"] = q["sni"]
+    return "hysteria", data, _safe_name(frag, f"Hy-{host}")
+
+
+def parse_wireguard(uri: str) -> Tuple[str, dict, str]:
+    """wireguard://publickey@host:port?privatekey=xxx&ip=10.0.0.2&mtu=1420#name"""
+    body = uri.split("://", 1)[1]
+    frag = ""
+    if "#" in body:
+        body, frag = body.split("#", 1)
+    qs = ""
+    if "?" in body:
+        body, qs = body.split("?", 1)
+    userinfo, hostport = (body.rsplit("@", 1) if "@" in body else ("", body))
+    host, port = hostport.rsplit(":", 1)
+    data = {
+        "server": host.strip("[]"), "port": int(port),
+        "public-key": unquote(userinfo), "udp": True,
+    }
+    q = {k: v[0] for k, v in parse_qs(qs).items() if v}
+    if q.get("privatekey"): data["private-key"] = q["privatekey"]
+    if q.get("ip"): data["ip"] = q["ip"]
+    if q.get("dns"): data["dns"] = q["dns"]
+    if q.get("mtu"): data["mtu"] = int(q["mtu"])
+    if q.get("reserved"): data["reserved"] = q["reserved"]
+    return "wireguard", data, _safe_name(frag, f"WG-{host}")
+
+
 PARSERS = {
     "ss://": parse_ss, "vmess://": parse_vmess, "vless://": parse_vless,
     "trojan://": parse_trojan, "hysteria2://": parse_hysteria2,
     "hy2://": parse_hysteria2, "tuic://": parse_tuic,
+    "socks5://": parse_socks5, "socks://": parse_socks5,
+    "snell://": parse_snell, "ssr://": parse_ssr,
+    "hysteria://": parse_hysteria, "wireguard://": parse_wireguard,
 }
+
+
+def _random_password(n=16):
+    import secrets, string
+    return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(n))
+
+
+def _is_ipv4(s: str) -> bool:
+    import socket
+    try:
+        socket.inet_pton(socket.AF_INET, s)
+        return True
+    except OSError:
+        return False
+
+
+def _is_domain(s: str) -> bool:
+    return bool(re.match(r'^[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z]{2,})+$', s))
+
+
+def parse_host_port(line: str) -> Tuple[str, dict, str]:
+    """解析 host:port#remark 或 host#remark（无协议前缀的 CF 优选格式）"""
+    remark = ""
+    if "#" in line:
+        line, remark = line.split("#", 1)
+    line = line.strip()
+    remark = remark.strip() or f"优选-{line}"
+
+    # 防御：URL / 协议保留字符直接拒绝
+    if not line or "://" in line or "/" in line or "?" in line or " " in line:
+        raise ValueError("host[:port] 格式无效")
+
+    # host:port 或 host
+    if ":" in line:
+        host, port_s = line.rsplit(":", 1)
+        try:
+            port = int(port_s)
+        except ValueError:
+            host, port = line, 443
+    else:
+        host, port = line, 443
+
+    if not (host and 0 < port < 65536):
+        raise ValueError("host/port 无效")
+
+    # 构造为 trojan://random@host:port?security=tls#remark
+    password = _random_password(18)
+    uri = f"trojan://{password}@{host}:{port}?security=tls#{remark}"
+    return parse_trojan(uri)
 
 
 # ---------- Clash YAML ----------
@@ -239,6 +425,18 @@ def parse_content(content: str) -> dict:
         except Exception as e:
             errors.append(f"YAML 解析失败: {e}")
 
+    # 1.1) JSON 数组（含 type+server 的对象数组）
+    stripped = content.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            arr = json.loads(stripped)
+            if isinstance(arr, list) and arr and all(isinstance(x, dict) and x.get("server") for x in arr):
+                got = _from_clash_proxies(arr)
+                if got:
+                    return {"nodes": got, "errors": errors}
+        except Exception as e:
+            errors.append(f"JSON 解析失败: {e}")
+
     # 2) 逐行解析
     lines = [l.strip() for l in content.splitlines() if l.strip()]
     parsed_any = False
@@ -251,6 +449,28 @@ def parse_content(content: str) -> dict:
                 parsed_any = True
             except Exception as e:
                 errors.append(f"行解析失败: {line[:40]}... ({e})")
+            continue
+        # 2.1) http:// 开头：IP 型视为 HTTP 代理节点，否则视为订阅 URL 跳过
+        if low.startswith("http://"):
+            try:
+                results.append(parse_http_proxy(line))
+                parsed_any = True
+                continue
+            except Exception:
+                pass
+            continue
+
+        # 2.2) https://（整段订阅 URL）、注释、协议相对链接 → 跳过
+        if low.startswith(("https://", "#", "//")):
+            continue
+
+        # 2.3) 无协议前缀的 host:port#remark / host#remark（CF 优选格式）
+        try:
+            results.append(parse_host_port(line))
+            parsed_any = True
+            continue
+        except Exception as e:
+            errors.append(f"行解析失败: {line[:40]}... ({e})")
 
     if parsed_any:
         return {"nodes": results, "errors": errors}
@@ -296,11 +516,37 @@ def build_from_form(form: dict) -> Tuple[str, dict, str]:
         data["cipher"] = "auto"
     elif ntype in ("vless",):
         data["uuid"] = form.get("uuid") or ""
-    elif ntype in ("trojan", "hysteria2", "hy2"):
+    elif ntype in ("trojan", "hysteria2", "hy2", "hysteria"):
         data["password"] = form.get("password") or ""
+        if ntype == "hysteria":
+            data["auth-str"] = form.get("password") or ""
     elif ntype == "tuic":
         data["uuid"] = form.get("uuid") or ""
         data["password"] = form.get("password") or ""
+    elif ntype in ("socks5", "socks"):
+        if form.get("username"): data["username"] = form["username"]
+        if form.get("password"): data["password"] = form["password"]
+        return "socks5", data, name
+    elif ntype in ("http", "https"):
+        if form.get("username"): data["username"] = form["username"]
+        if form.get("password"): data["password"] = form["password"]
+        return "http", data, name
+    elif ntype == "snell":
+        data["password"] = form.get("password") or ""
+        data["psk"] = form.get("psk") or form.get("password") or ""
+        if form.get("obfs"): data["obfs"] = form["obfs"]
+    elif ntype == "ssr":
+        data["protocol"] = form.get("protocol") or "origin"
+        data["cipher"] = form.get("cipher") or "aes-256-cfb"
+        data["obfs"] = form.get("obfs") or "plain"
+        data["password"] = form.get("password") or ""
+        data["obfs-param"] = form.get("obfs_param") or ""
+        data["protocol-param"] = form.get("protocol_param") or ""
+    elif ntype == "wireguard":
+        data["public-key"] = form.get("public_key") or ""
+        data["private-key"] = form.get("private_key") or ""
+        if form.get("ip"): data["ip"] = form["ip"]
+        if form.get("mtu"): data["mtu"] = int(form["mtu"])
     else:
         raise ValueError(f"暂不支持类型: {ntype}")
 
