@@ -109,15 +109,34 @@ def enable_source(source_id: int, enabled: int = 1):
 
 # ===== Node CRUD =====
 
-def add_node(subscribe_url: str, source_id: Optional[int], node_name: str, node_type: str, node_data: dict) -> Node:
+def add_node(subscribe_url: str, source_id: Optional[int], node_name: str, node_type: str, node_data: dict, status: Optional[str] = None) -> Node:
     with get_connection() as conn:
+            node_status = status or NodeStatus.UNKNOWN.value
             cursor = conn.execute(
                 """INSERT INTO nodes (subscribe_url, source_id, node_name, node_type, node_data, status)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (subscribe_url, source_id, node_name, node_type, json.dumps(node_data), NodeStatus.UNKNOWN.value)
+                (subscribe_url, source_id, node_name, node_type, json.dumps(node_data), node_status)
             )
             node_id = cursor.lastrowid
             return get_node(node_id)
+
+
+def get_or_create_manual_source(label: str = "手动导入") -> Source:
+    """手动导入专用数据源（type=manual），按 label 复用"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM sources WHERE source_type = 'manual' AND name = ?", (label,)
+        ).fetchone()
+        if row:
+            return Source(**dict(row))
+        now = int(__import__('time').time())
+        cur = conn.execute(
+            """INSERT INTO sources (name, url, source_type, enabled, category, created_at, updated_at)
+               VALUES (?, ?, 'manual', 1, 'manual', ?, ?)""",
+            (label, f"manual://{label}", now, now)
+        )
+        row = conn.execute("SELECT * FROM sources WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return Source(**dict(row))
 
 
 def get_node(node_id: int) -> Optional[Node]:
@@ -133,19 +152,25 @@ def get_node(node_id: int) -> Optional[Node]:
 def list_nodes(status: Optional[str] = None, country: Optional[str] = None, node_type: Optional[str] = None,
                limit: int = 100, min_score: Optional[float] = None, min_speed: Optional[float] = None,
                max_latency: Optional[int] = None, sort: str = "latency", order: str = "asc",
-               offset: int = 0) -> List[Node]:
+               offset: int = 0, source_type: Optional[str] = None) -> List[Node]:
     with get_connection() as conn:
-        query = "SELECT * FROM nodes WHERE 1=1"
+        query = "SELECT n.* FROM nodes n LEFT JOIN sources s ON n.source_id = s.id WHERE 1=1"
         params = []
         if status:
-            query += " AND status = ?"
+            query += " AND n.status = ?"
             params.append(status)
         if country:
-            query += " AND country = ?"
+            query += " AND n.country = ?"
             params.append(country)
         if node_type:
-            query += " AND node_type = ?"
+            query += " AND n.node_type = ?"
             params.append(node_type)
+        if source_type:
+            if source_type == "auto":
+                query += " AND COALESCE(s.source_type, '') != 'manual'"
+            else:
+                query += " AND s.source_type = ?"
+                params.append(source_type)
         if min_score is not None:
             query += " AND score >= ?"
             params.append(min_score)
@@ -535,18 +560,29 @@ def update_node_scores() -> int:
 
 def get_ranking(limit: int = 50, country: Optional[str] = None,
                 node_type: Optional[str] = None, min_score: float = 0,
-                offset: int = 0) -> List[Node]:
-    """获取节点排名（按评分降序）"""
+                offset: int = 0, source_type: Optional[str] = None,
+                status: Optional[str] = None) -> List[Node]:
+    """获取节点排名（按评分降序）；source_type: manual/auto"""
     with get_connection() as conn:
-        query = "SELECT * FROM nodes WHERE score >= ?"
+        query = ("SELECT n.* FROM nodes n LEFT JOIN sources s ON n.source_id = s.id "
+                 "WHERE n.score >= ?")
         params = [min_score]
         if country:
-            query += " AND country = ?"
+            query += " AND n.country = ?"
             params.append(country)
         if node_type:
-            query += " AND node_type = ?"
+            query += " AND n.node_type = ?"
             params.append(node_type)
-        query += " ORDER BY score DESC, download_speed DESC LIMIT ? OFFSET ?"
+        if status:
+            query += " AND n.status = ?"
+            params.append(status)
+        if source_type:
+            if source_type == "auto":
+                query += " AND COALESCE(s.source_type, '') != 'manual'"
+            else:
+                query += " AND s.source_type = ?"
+                params.append(source_type)
+        query += " ORDER BY n.score DESC, n.download_speed DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         rows = conn.execute(query, params).fetchall()

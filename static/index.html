@@ -278,6 +278,11 @@
                             <option value="created">按新增</option>
                             <option value="country">按国家</option>
                         </select>
+                        <select class="form-input" style="width:130px;" id="nf-src" onchange="loadNodes()">
+                            <option value="">全部来源</option>
+                            <option value="manual">🛠 手动导入</option>
+                            <option value="auto">🤖 系统优选</option>
+                        </select>
                         <select class="form-input" style="width:100px;" id="nf-order" onchange="loadNodes()">
                             <option value="asc">升序</option>
                             <option value="desc">降序</option>
@@ -300,9 +305,11 @@
             const type = document.getElementById('nf-type').value;
             const sort = document.getElementById('nf-sort') ? document.getElementById('nf-sort').value : 'latency';
             const order = document.getElementById('nf-order') ? document.getElementById('nf-order').value : 'asc';
+            const src = document.getElementById('nf-src') ? document.getElementById('nf-src').value : '';
             let url = `${API}/nodes?limit=200&sort=${sort}&order=${order}`;
             if (status) url += `&status=${status}`;
             if (type) url += `&node_type=${type}`;
+            if (src) url += `&source_type=${src}`;
             try {
                 const nodes = await (await fetch(url)).json();
                 allNodes = nodes;
@@ -422,20 +429,122 @@
         // ===== 数据源 =====
         function renderSources(main) {
             main.innerHTML = `
-                <div class="page-header"><h1 class="page-title">📡 数据源</h1>
+                <div class="page-header"><h1 class="page-title">📡 数据源与导入</h1>
                     <div class="flex">
-                        <button class="btn btn-secondary" onclick="showPresetModal()">📦 预置源</button>
-                        <button class="btn btn-secondary" onclick="showAddSourceModal()">➕ 手动添加</button>
-                        <button class="btn btn-secondary" onclick="showRawImportModal()">📋 粘贴导入</button>
+                        <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
+                        <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
                         <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
                     </div>
                 </div>
-                <div id="source-health" class="stats-grid" style="grid-template-columns:repeat(3,1fr);"></div>
-                <div class="table-container"><table><thead><tr>
-                    <th>名称</th><th>URL</th><th>类型</th><th>节点数</th><th>健康状态</th><th>操作</th>
-                </tr></thead><tbody id="sources-tbody"></tbody></table></div>
+                <div id="sources-tab-list" style="${sourcesTab==='list'?'':'display:none;'}">
+                    <div id="source-health" class="stats-grid" style="grid-template-columns:repeat(3,1fr);"></div>
+                    <div class="table-container"><table><thead><tr>
+                        <th>名称</th><th>URL</th><th>类型</th><th>节点数</th><th>健康状态</th><th>操作</th>
+                    </tr></thead><tbody id="sources-tbody"></tbody></table></div>
+                </div>
+                <div id="sources-tab-import" style="${sourcesTab==='import'?'':'display:none;'}">
+                    <div class="chart-container">
+                        <h3 style="margin-bottom:12px;">🔗 导入优选/机场订阅链接</h3>
+                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">订阅 URL 会被加入源列表，定时测速时自动拉取其中的节点</p>
+                        <div class="flex">
+                            <input class="form-input" style="flex:1;min-width:200px;" id="imp-sub-name" placeholder="名称（如：我的机场）">
+                            <input class="form-input" style="flex:2;min-width:280px;" id="imp-sub-url" placeholder="https://example.com/subscribe?token=...">
+                            <button class="btn btn-primary" onclick="importSubUrl()">➕ 添加订阅</button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3 style="margin-bottom:12px;">📋 批量导入节点链接</h3>
+                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">每行一条，支持 ss:// vmess:// vless:// trojan:// hysteria2:// tuic:// 链接、Clash YAML、整段 Base64 订阅</p>
+                        <textarea class="form-input" id="imp-batch" rows="6" style="width:100%;font-family:monospace;font-size:12px;" placeholder="ss://YWVzLTEyOC1nY206cGFzcw==@1.2.3.4:443#我的节点&#10;vless://uuid@host:443?security=tls#节点2&#10;vmess://eyJhZGQiOi..."></textarea>
+                        <div class="flex mt-4" style="align-items:center;">
+                            <input class="form-input" style="width:200px;" id="imp-batch-label" placeholder="分组标签（默认：手动导入）">
+                            <button class="btn btn-primary" onclick="importBatchNodes()">⬆️ 批量导入</button>
+                            <span id="imp-batch-result" class="text-muted" style="font-size:13px;"></span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3 style="margin-bottom:12px;">🖱 手动录入单个节点</h3>
+                        <div class="flex" style="flex-wrap:wrap;gap:10px;">
+                            <select class="form-input" style="width:130px;" id="imp-single-type">
+                                <option value="ss">SS</option><option value="vmess">VMess</option>
+                                <option value="vless">VLESS</option><option value="trojan">Trojan</option>
+                                <option value="hysteria2">Hysteria2</option><option value="tuic">TUIC</option>
+                            </select>
+                            <input class="form-input" style="width:180px;" id="imp-single-server" placeholder="服务器地址/IP">
+                            <input class="form-input" style="width:90px;" id="imp-single-port" placeholder="端口" type="number">
+                            <input class="form-input" style="width:220px;" id="imp-single-secret" placeholder="密码 / UUID">
+                            <input class="form-input" style="width:150px;" id="imp-single-cipher" placeholder="加密方式(SS)">
+                            <input class="form-input" style="width:150px;" id="imp-single-sni" placeholder="SNI（可选）">
+                            <input class="form-input" style="width:150px;" id="imp-single-name" placeholder="节点名称（可选）">
+                        </div>
+                        <div class="flex mt-4" style="align-items:center;">
+                            <button class="btn btn-primary" onclick="importSingleNode()">💾 保存节点</button>
+                            <span id="imp-single-result" class="text-muted" style="font-size:13px;"></span>
+                        </div>
+                    </div>
+                </div>
             `;
             loadSources();
+        }
+
+        let sourcesTab = 'list';
+        function switchSourcesTab(tab) {
+            sourcesTab = tab;
+            const page = document.getElementById('page-content');
+            if (page) renderSources(page);
+        }
+
+        async function importSubUrl() {
+            const name = document.getElementById('imp-sub-name').value.trim() || '手动订阅';
+            const url = document.getElementById('imp-sub-url').value.trim();
+            if (!url) return showToast('请输入订阅链接', 'error');
+            try {
+                const res = await fetch(`${API}/sources`, { method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ name, url, source_type: 'manual' }) });
+                if (res.ok) {
+                    showToast('✅ 订阅已添加，下轮测速自动拉取节点');
+                    document.getElementById('imp-sub-url').value = '';
+                    loadSources();
+                } else { const e = await res.json(); showToast('添加失败: ' + (e.detail||''), 'error'); }
+            } catch(err) { showToast('网络错误', 'error'); }
+        }
+
+        async function importBatchNodes() {
+            const content = document.getElementById('imp-batch').value.trim();
+            const label = document.getElementById('imp-batch-label').value.trim() || '手动导入';
+            const out = document.getElementById('imp-batch-result');
+            if (!content) return showToast('请粘贴节点内容', 'error');
+            out.textContent = '解析导入中...';
+            try {
+                const res = await fetch(`${API}/nodes/import`, { method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ content, label }) });
+                const d = await res.json();
+                if (res.ok) {
+                    out.textContent = `✅ 成功 ${d.imported} 条${d.skipped?`，跳过重复 ${d.skipped}`:''}${d.errors.length?`，失败 ${d.errors.length}`:''}`;
+                    showToast(`导入完成：${d.imported} 条节点已入库`);
+                    document.getElementById('imp-batch').value = '';
+                } else { out.textContent = '❌ ' + (d.detail||'导入失败'); }
+            } catch(err) { out.textContent = '❌ 网络错误'; }
+        }
+
+        async function importSingleNode() {
+            const g = id => document.getElementById(id).value.trim();
+            const out = document.getElementById('imp-single-result');
+            const body = {
+                type: g('imp-single-type'), server: g('imp-single-server'),
+                port: parseInt(g('imp-single-port')) || 0,
+                password: g('imp-single-secret') || null, uuid: g('imp-single-secret') || null,
+                cipher: g('imp-single-cipher') || null, sni: g('imp-single-sni') || null,
+                name: g('imp-single-name') || null
+            };
+            if (!body.server || !body.port) return showToast('请填服务器和端口', 'error');
+            try {
+                const res = await fetch(`${API}/nodes/import/single`, { method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(body) });
+                const d = await res.json();
+                if (res.ok) { out.textContent = `✅ 已保存: ${d.name}`; showToast('节点已入库'); }
+                else { out.textContent = '❌ ' + (d.detail||''); }
+            } catch(err) { out.textContent = '❌ 网络错误'; }
         }
 
         async function loadSources() {
@@ -608,15 +717,42 @@
         // ===== 订阅输出 =====
         function renderSubscribe(main) {
             main.innerHTML = `
-                <div class="page-header"><h1 class="page-title">📥 订阅输出</h1></div>
-                <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
-                    <div class="stat-card"><div class="stat-value">Clash</div><div class="stat-label">YAML 格式</div></div>
-                    <div class="stat-card"><div class="stat-value">V2Ray</div><div class="stat-label">Base64 链接</div></div>
-                    <div class="stat-card"><div class="stat-value">Sing-box</div><div class="stat-label">JSON 格式</div></div>
-                    <div class="stat-card"><div class="stat-value">Base64</div><div class="stat-label">原始编码</div></div>
+                <div class="page-header"><h1 class="page-title">📥 订阅输出</h1>
+                    <button class="btn btn-primary" onclick="genAggLink()">⚡ 一键生成聚合订阅</button>
                 </div>
+
+                <div class="chart-container" style="border:1px solid #22c55e55;">
+                    <h3 style="margin-bottom:8px;">🌟 聚合订阅（手动导入 + 系统优选 全部节点）</h3>
+                    <p class="text-muted" style="font-size:12px;margin-bottom:12px;">一个链接包含所有来源的可用节点，导入 Clash/V2Ray 客户端即可使用。每 6 小时随测速自动更新。</p>
+                    <div class="flex" style="flex-wrap:wrap;gap:10px;align-items:center;">
+                        <select class="form-input" style="width:150px;" id="agg-fmt" onchange="genAggLink()">
+                            <option value="clash">Clash YAML</option>
+                            <option value="v2ray">V2Ray</option>
+                            <option value="singbox">Sing-box</option>
+                            <option value="base64">Base64</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="copyAggLink()">📋 复制</button>
+                        <span id="agg-count" class="text-muted" style="font-size:13px;"></span>
+                    </div>
+                    <div class="token-display mt-4" id="agg-link" style="display:none;word-break:break-all;"></div>
+                    <div class="flex mt-4" style="align-items:flex-start;gap:24px;flex-wrap:wrap;">
+                        <div>
+                            <h4 style="margin-bottom:8px;">📱 扫码导入</h4>
+                            <div id="agg-qr" style="background:#fff;padding:8px;border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成后显示</span></div>
+                        </div>
+                        <div style="flex:1;min-width:220px;">
+                            <h4 style="margin-bottom:8px;">✂️ 分来源订阅</h4>
+                            <div class="flex" style="gap:8px;flex-wrap:wrap;">
+                                <button class="btn btn-secondary" onclick="copyText('${location.origin}/api/nodes/subscribe?fmt=clash&src=manual')">🛠 仅手动导入</button>
+                                <button class="btn btn-secondary" onclick="copyText('${location.origin}/api/nodes/subscribe?fmt=clash&src=auto')">🤖 仅系统优选</button>
+                            </div>
+                            <p class="text-muted" style="font-size:11px;margin-top:8px;">把 fmt=clash 换成 v2ray/singbox/base64 可切换格式</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="chart-container">
-                    <h3 style="margin-bottom:16px;">生成订阅链接</h3>
+                    <h3 style="margin-bottom:16px;">⚙️ 自定义订阅生成</h3>
                     <div class="form-group"><label class="form-label">格式</label>
                         <select class="form-input" id="sub-fmt" style="max-width:200px;">
                             <option value="clash">Clash YAML</option>
@@ -659,6 +795,42 @@
         }
 
         let lastSubLink = '';
+        async function genAggLink() {
+            const fmt = document.getElementById('agg-fmt').value;
+            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=2000`;
+            const el = document.getElementById('agg-link');
+            el.textContent = link; el.style.display = 'block';
+            window._aggLink = link;
+            renderSubQRTo('agg-qr', link);
+            try {
+                const stats = await (await fetch(`${API}/nodes/stats`)).json();
+                document.getElementById('agg-count').textContent = `当前聚合 ${stats.active ?? stats.active_nodes ?? '?'} 个可用节点`;
+            } catch(e) {}
+        }
+        function copyAggLink() {
+            const link = window._aggLink || `${location.origin}/api/nodes/subscribe?fmt=clash&limit=2000`;
+            copyText(link);
+        }
+        function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => showToast('✅ 已复制到剪贴板')).catch(() => fallbackCopy(text));
+            } else fallbackCopy(text);
+        }
+        function fallbackCopy(text) {
+            const ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); showToast('✅ 已复制'); } catch(e) { showToast('复制失败，请手动选择', 'error'); }
+            document.body.removeChild(ta);
+        }
+        function renderSubQRTo(containerId, text) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            try {
+                new QRCode(container, { text, width: 180, height: 180, colorDark: '#0f172a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+            } catch(e) { container.innerHTML = '<span class="text-muted">QR 生成失败</span>'; }
+        }
         function genSubLink() {
             const fmt = document.getElementById('sub-fmt').value;
             const limit = document.getElementById('sub-limit').value || 100;

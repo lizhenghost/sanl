@@ -19,6 +19,12 @@ source:
 speed-concurrent: 30
 speed-test-url: http://cachefly.cachefly.net/10mb.test
 sub-urls:
+- https://raw.githubusercontent.com/snakem982/proxypool/main/source/freenode
+- https://raw.githubusercontent.com/mermeroo/V2RAY-CLASH-BASE64/main/sub.txt
+- https://raw.githubusercontent.com/Alvin9999/pac2/master/clash.meta.yaml
+- https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash.yaml
+- https://raw.githubusercontent.com/Pawdroid/Free-servers/main/clash.yml
+- https://raw.githubusercontent.com/free-nodes/clashfree/main/clash.yml
 - https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge_base64.txt
 sub-urls-concurrent: 20
 sub-urls-retry: 3

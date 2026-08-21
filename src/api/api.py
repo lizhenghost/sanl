@@ -116,6 +116,74 @@ async def delete_source(source_id: int):
     return {"status": "ok"}
 
 
+# ===== 手动导入（订阅链接/节点链接/单节点表单）=====
+
+class NodeImportRequest(BaseModel):
+    content: str  # 多行 ss/vmess/vless/trojan/hy2/tuic 链接、Clash YAML 或 Base64 订阅
+    label: str = "手动导入"
+
+
+class SingleNodeForm(BaseModel):
+    type: str  # ss / vmess / vless / trojan / hysteria2 / tuic
+    server: str
+    port: int
+    password: Optional[str] = None
+    uuid: Optional[str] = None
+    cipher: Optional[str] = None
+    sni: Optional[str] = None
+    name: Optional[str] = None
+    skip_cert_verify: bool = False
+
+
+@api_router.post("/nodes/import")
+async def import_nodes(req: NodeImportRequest):
+    """批量手动导入节点：支持多行协议链接 / Clash YAML / Base64 订阅内容"""
+    from .importer import parse_content
+    result = parse_content(req.content)
+    if not result["nodes"]:
+        raise HTTPException(status_code=400, detail="；".join(result["errors"]) or "无可识别的节点")
+
+    src = repository.get_or_create_manual_source(req.label)
+    imported, skipped = 0, 0
+    for ntype, data, name in result["nodes"]:
+        try:
+            # 同源同名同地址去重
+            existing = repository.list_nodes(source_type="manual", limit=5000)
+            if any(n.node_name == name and (n.node_data or {}).get("server") == data.get("server")
+                   for n in existing):
+                skipped += 1
+                continue
+            repository.add_node(
+                subscribe_url=f"manual://{req.label}", source_id=src.id,
+                node_name=name, node_type=ntype, node_data=data,
+                status="active"
+            )
+            imported += 1
+        except Exception as e:
+            result["errors"].append(f"{name}: {e}")
+
+    return {"imported": imported, "skipped": skipped, "errors": result["errors"][:10],
+            "total_parsed": len(result["nodes"])}
+
+
+@api_router.post("/nodes/import/single")
+async def import_single_node(form: SingleNodeForm):
+    """表单式导入单个节点"""
+    from .importer import build_from_form
+    try:
+        ntype, data, name = build_from_form(form.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    src = repository.get_or_create_manual_source("手动导入")
+    repository.add_node(
+        subscribe_url="manual://form", source_id=src.id,
+        node_name=name, node_type=ntype, node_data=data,
+        status="active"
+    )
+    return {"status": "ok", "name": name, "type": ntype}
+
+
 # ===== 节点接口 =====
 
 @api_router.get("/nodes", response_model=List[models.Node])
@@ -129,13 +197,14 @@ async def list_nodes(
     min_speed: Optional[float] = Query(None, ge=0, description="最低速度 KB/s"),
     max_latency: Optional[int] = Query(None, ge=0, description="最大延迟 ms"),
     sort: str = Query("latency", pattern="^(latency|speed|score|created|name|country)$"),
-    order: str = Query("asc", pattern="^(asc|desc)$")
+    order: str = Query("asc", pattern="^(asc|desc)$"),
+    source_type: Optional[str] = Query(None, description="manual=手动导入, auto=系统抓取")
 ):
     """获取节点列表（筛选/排序/分页，方案 v2.1 Phase 4）"""
     nodes = repository.list_nodes(
         status=status, country=country, node_type=node_type, limit=limit,
         offset=offset, min_score=min_score, min_speed=min_speed,
-        max_latency=max_latency, sort=sort, order=order
+        max_latency=max_latency, sort=sort, order=order, source_type=source_type
     )
     result = []
     for n in nodes:
@@ -185,16 +254,18 @@ async def get_subscribe(
     min_score: float = Query(0, ge=0, le=100),
     min_speed: Optional[float] = Query(None, ge=0, description="最低速度 KB/s"),
     max_latency: Optional[int] = Query(None, ge=0, description="最大延迟 ms"),
-    country: Optional[str] = Query(None)
+    country: Optional[str] = Query(None),
+    src: Optional[str] = Query(None, pattern="^(manual|auto)$", description="来源筛选")
 ):
     """获取多格式订阅链接（支持 min_speed/max_latency 筛选，方案 4.3 节）"""
     from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64
 
-    # 获取活跃节点，按评分降序
+    # 获取活跃节点，按评分降序（src: manual=手动导入, auto=系统抓取, None=聚合全部）
     nodes = repository.get_ranking(
         limit=limit,
         country=country,
-        min_score=min_score
+        min_score=min_score,
+        source_type=src
     )
 
     # 内存过滤 min_speed / max_latency（ranking 不支持的维度）
@@ -241,10 +312,11 @@ async def subscribe_by_token(
     min_score: float = Query(0, ge=0, le=100),
     min_speed: Optional[float] = Query(None, ge=0),
     max_latency: Optional[int] = Query(None, ge=0),
-    country: Optional[str] = Query(None)
+    country: Optional[str] = Query(None),
+    src: Optional[str] = Query(None, pattern="^(manual|auto)$")
 ):
     """Token 鉴权订阅输出：/sub/np_xxx/clash?v2ray|singbox|base64
-    支持筛选参数 region/min_speed/max_latency（方案 4.3 + 第九节）"""
+    支持筛选参数 min_speed/max_latency/src（聚合手动+系统全部节点）"""
     from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64
 
     # Token 校验（无效/禁用/过期 → 401）
@@ -252,7 +324,7 @@ async def subscribe_by_token(
     if not info:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    nodes = repository.get_ranking(limit=limit, country=country, min_score=min_score)
+    nodes = repository.get_ranking(limit=limit, country=country, min_score=min_score, source_type=src)
     if min_speed is not None:
         nodes = [n for n in nodes if (n.download_speed or 0) >= min_speed * 1024]
     if max_latency is not None:
