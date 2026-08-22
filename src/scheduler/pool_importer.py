@@ -10,6 +10,7 @@ import time
 from typing import Optional
 
 from ..schema import repository
+from ..utils.net import detect_isp
 from ..scraper.scraper import Scraper
 from ..api.importer import parse_content
 
@@ -19,17 +20,6 @@ logger = logging.getLogger(__name__)
 FETCH_CONCURRENCY = 4
 
 
-def detect_isp(*texts) -> str:
-    """从 URL/名称/备注推断运营商：telecom(电信)/mobile(移动)/unicom(联通)/all(三网通用)"""
-    import re
-    joined = " ".join(t for t in texts if t).lower()
-    if any(k in joined for k in ("cmcc", "移动")):
-        return "mobile"
-    if any(k in joined for k in ("unicom", "联通")) or re.search(r'(^|[^a-z])cu([^a-z]|$)', joined):
-        return "unicom"
-    if any(k in joined for k in ("telecom", "电信")) or re.search(r'(^|[^a-z])ct([^a-z]|$)', joined):
-        return "telecom"
-    return ""
 
 
 async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional[int] = None) -> dict:

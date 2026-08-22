@@ -14,6 +14,7 @@ import time
 from typing import List
 
 from ..schema import repository
+from ..utils.net import tcping as _tcping_core
 
 logger = logging.getLogger(__name__)
 
@@ -121,22 +122,6 @@ def build_candidates(ip_type: int, ranges: List[str], slim: bool,
             out.append(str(net.network_address))
     # 去重保序
     return list(dict.fromkeys(out))
-
-
-async def _tcping(host: str, port: int, timeout: float = 1.0) -> float | None:
-    loop = asyncio.get_event_loop()
-    start = loop.time()
-    try:
-        _, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
-        rtt = (loop.time() - start) * 1000
-        w.close()
-        try:
-            await w.wait_closed()
-        except Exception:
-            pass
-        return round(rtt)
-    except Exception:
-        return None
 
 
 async def _trace_colo(ip: str, port: int, is_tls: bool, timeout: float = 2.5) -> str:

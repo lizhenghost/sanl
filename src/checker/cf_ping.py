@@ -8,30 +8,13 @@ import time
 from typing import List
 
 from ..schema import repository
+from ..utils.net import tcping as _tcping_shared
 
 logger = logging.getLogger(__name__)
 
 # 并发与超时：4200+ 端点场景下 ~30 秒内完成一轮
 PING_CONCURRENCY = 300
 PING_TIMEOUT = 1.5  # 秒
-
-
-async def _tcping(host: str, port: int) -> float | None:
-    """单次 TCP 握手延迟（毫秒），失败返回 None"""
-    loop = asyncio.get_event_loop()
-    start = loop.time()
-    try:
-        _, w = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=PING_TIMEOUT)
-        rtt_ms = (loop.time() - start) * 1000
-        w.close()
-        try:
-            await w.wait_closed()
-        except Exception:
-            pass
-        return round(rtt_ms)
-    except Exception:
-        return None
 
 
 async def _worker(queue: asyncio.Queue, sem: asyncio.Semaphore, out: list):
@@ -43,7 +26,7 @@ async def _worker(queue: asyncio.Queue, sem: asyncio.Semaphore, out: list):
         host, port, idx = item
         async with sem:
             out[idx] = {"host": host, "port": port,
-                        "latency_ms": await _tcping(host, port)}
+                        "latency_ms": await _tcping_shared(host, port, PING_TIMEOUT)}
         queue.task_done()
 
 
@@ -84,7 +67,7 @@ async def ping_sample(host: str, port: int, count: int = 3) -> dict:
     """单端点多次采样取最小值"""
     rtts = []
     for _ in range(max(1, count)):
-        rtt = await _tcping(host, port)
+        rtt = await _tcping_shared(host, port, PING_TIMEOUT)
         if rtt is not None:
             rtts.append(rtt)
         await asyncio.sleep(0.05)

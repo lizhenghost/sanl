@@ -106,16 +106,7 @@ def _migrate(conn):
 def _backfill_cf_isp(conn):
     """存量 CF 端点按 remark/来源补 isp 分类"""
     import re as _re
-
-    def _detect(text: str) -> str:
-        t = (text or "").lower()
-        if any(k in t for k in ("cmcc", "移动")):
-            return "mobile"
-        if any(k in t for k in ("unicom", "联通")):
-            return "unicom"
-        if any(k in t for k in ("telecom", "电信")):
-            return "telecom"
-        return ""
+    from ..utils.net import detect_isp as _detect
 
     rows = conn.execute("""
         SELECT e.id, e.remark, COALESCE(s.url,'') AS url, COALESCE(s.name,'') AS name, e.isp

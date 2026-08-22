@@ -390,9 +390,11 @@ def parse_host_port(line: str) -> Tuple[str, dict, str]:
 _DOMAIN_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$', re.IGNORECASE)
 
 
+from ..utils.net import detect_isp as _detect_isp_shared, detect_ip_version as _detect_ipv_shared
+
+
 def _is_ipv6(host: str) -> bool:
     """裸 IPv6 或 [方括号] 形式"""
-    import ipaddress
     h = (host or "").strip().strip("[]")
     if ":" not in h:
         return False
@@ -404,18 +406,8 @@ def _is_ipv6(host: str) -> bool:
 
 
 def detect_ip_version(host: str) -> int:
-    """IP 版本：4=IPv4 / 6=IPv6 / 0=域名"""
-    import ipaddress
-    h = (host or "").strip().strip("[]")
-    if ":" in h:
-        try:
-            return ipaddress.ip_address(h).version
-        except ValueError:
-            return 0
-    try:
-        return ipaddress.ip_address(h).version
-    except ValueError:
-        return 0
+    """兼容别名：共享工具"""
+    return _detect_ipv_shared(host)
 
 
 def _is_valid_endpoint_host(host: str) -> bool:
