@@ -471,6 +471,7 @@
                     <div class="flex">
                         <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
                         <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
+                        <button class="btn btn-secondary" onclick="importAllSources(this)">🔄 全量导入</button>
                         <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
                     </div>
                 </div>
@@ -536,13 +537,28 @@
             if (page) renderSources(page);
         }
 
+        async function importAllSources(btn) {
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 导入中…'; }
+            try {
+                const res = await fetch(`${API}/sources/import-all`, { method: 'POST' });
+                if (!res.ok) throw new Error(await res.text());
+                showToast('✅ 全量导入已启动，抓取解析约需 1-3 分钟，稍后点「刷新」查看各源节点数');
+                setTimeout(loadSources, 30000);
+            } catch(e) {
+                showToast('❌ 启动失败: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🔄 全量导入'; }
+            }
+        }
+
         async function importSubUrl() {
             const name = document.getElementById('imp-sub-name').value.trim() || '手动订阅';
             const url = document.getElementById('imp-sub-url').value.trim();
             if (!url) return showToast('请输入订阅链接', 'error');
             try {
+                const stype = /github\.com|raw\.githubusercontent\.com/.test(url) ? 'github' : 'http';
                 const res = await fetch(`${API}/sources`, { method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ name, url, source_type: 'manual' }) });
+                    body: JSON.stringify({ name, url, source_type: stype }) });
                 if (res.ok) {
                     showToast('✅ 订阅已添加，下轮测速自动拉取节点');
                     document.getElementById('imp-sub-url').value = '';
@@ -790,10 +806,15 @@
                     <div class="flex" style="flex-wrap:wrap;gap:10px;align-items:center;">
                         <select class="form-input" style="width:150px;" id="agg-fmt" onchange="genAggLink()">
                             <option value="clash">Clash YAML</option>
+                            <option value="clash-meta">Clash.Meta</option>
                             <option value="v2ray">V2Ray</option>
                             <option value="singbox">Sing-box</option>
                             <option value="base64">Base64</option>
                             <option value="txt">Txt 明文</option>
+                            <option value="mixed">Mixed 混合链接</option>
+                            <option value="surge">Surge</option>
+                            <option value="loon">Loon</option>
+                            <option value="qx">Quantumult X</option>
                         </select>
                         <button class="btn btn-secondary" onclick="copyAggLink()">📋 复制</button>
                         <span id="agg-count" class="text-muted" style="font-size:13px;"></span>
@@ -820,14 +841,19 @@
                     <div class="form-group"><label class="form-label">格式</label>
                         <select class="form-input" id="sub-fmt" style="max-width:200px;">
                             <option value="clash">Clash YAML</option>
+                            <option value="clash-meta">Clash.Meta</option>
                             <option value="v2ray">V2Ray</option>
                             <option value="singbox">Sing-box</option>
                             <option value="base64">Base64</option>
                             <option value="txt">Txt 明文</option>
+                            <option value="mixed">Mixed 混合链接</option>
+                            <option value="surge">Surge</option>
+                            <option value="loon">Loon</option>
+                            <option value="qx">Quantumult X</option>
                         </select>
                     </div>
                     <div class="form-group"><label class="form-label">数量限制</label>
-                        <input class="form-input" id="sub-limit" type="number" value="100" min="1" max="2000" style="max-width:200px;">
+                        <input class="form-input" id="sub-limit" type="number" value="1000" min="1" max="20000" style="max-width:200px;">
                     </div>
                     <div class="form-group"><label class="form-label">最低评分</label>
                         <input class="form-input" id="sub-minscore" type="number" value="0" min="0" max="100" style="max-width:200px;">
@@ -851,7 +877,10 @@
                                 <code style="color:#38bdf8;">/sub/&lt;token&gt;/v2ray</code> ·
                                 <code style="color:#38bdf8;">/singbox</code> ·
                                 <code style="color:#38bdf8;">/base64</code> ·
-                                <code style="color:#38bdf8;">/txt</code><br>
+                                <code style="color:#38bdf8;">/txt</code> ·
+                                <code style="color:#38bdf8;">/surge</code> ·
+                                <code style="color:#38bdf8;">/loon</code> ·
+                                <code style="color:#38bdf8;">/qx</code><br>
                                 筛选参数：<code>?min_speed=10&max_latency=300&limit=100</code>
                             </p>
                         </div>
@@ -863,7 +892,7 @@
         let lastSubLink = '';
         async function genAggLink() {
             const fmt = document.getElementById('agg-fmt').value;
-            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=2000`;
+            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=5000`;
             const el = document.getElementById('agg-link');
             el.textContent = link; el.style.display = 'block';
             window._aggLink = link;
@@ -874,7 +903,7 @@
             } catch(e) {}
         }
         function copyAggLink() {
-            const link = window._aggLink || `${location.origin}/api/nodes/subscribe?fmt=clash&limit=2000`;
+            const link = window._aggLink || `${location.origin}/api/nodes/subscribe?fmt=clash&limit=5000`;
             copyText(link);
         }
         function copyText(text) {

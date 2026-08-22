@@ -23,6 +23,14 @@ SUB_PROTOCOLS = [
 STATIC_SOURCES_FILE = "presets/free_sources.json"
 STATIC_DIR = "data/static"
 
+# GitHub raw 被墙时的镜像加速前缀（依次回退）
+GH_MIRRORS = [
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+    "https://mirror.ghproxy.com/",
+]
+
 
 @dataclass
 class FetchedSource:
@@ -157,6 +165,62 @@ class Scraper:
     async def fetch_all(self) -> List[FetchedSource]:
         """获取所有数据源"""
         return await self.fetch_static_json()
+
+    async def _get_with_mirrors(self, url: str) -> Optional[str]:
+        """直连优先，失败后依次尝试 GitHub 镜像前缀（仅对 raw.githubusercontent.com / github.com 生效）"""
+        try:
+            resp = await self.client.get(url)
+            resp.raise_for_status()
+            return resp.text.strip()
+        except Exception as e:
+            if "github" not in url:
+                logger.error(f"Failed to fetch {url}: {e}")
+                return None
+            logger.warning(f"直连失败({e})，尝试镜像回退: {url}")
+            for m in GH_MIRRORS:
+                try:
+                    resp = await self.client.get(m + url, timeout=20.0)
+                    resp.raise_for_status()
+                    text = resp.text.strip()
+                    if text:
+                        logger.info(f"镜像成功: {m}")
+                        return text
+                except Exception as me:
+                    logger.warning(f"镜像失败 {m}: {me}")
+            return None
+
+    async def fetch_source(self, url: str, source_type: str = "http") -> Optional[FetchedSource]:
+        """按 URL/类型自动分发的统一抓取入口（池导入用）"""
+        st = (source_type or "").lower()
+        try:
+            if url.startswith("data:"):
+                return await self.fetch_static_file(url)
+            if st == "telegram" or "t.me/" in url:
+                return await self.fetch_telegram_channel(url)
+            if "github.com" in url or "raw.githubusercontent.com" in url or st == "github":
+                content = await self._github_raw_content(url)
+                name = url.rstrip('/').split('/')[-1].split('?')[0] or f"github-{url.split('/')[-2]}"
+                if content is None:
+                    return FetchedSource(name=name, url=url, error="直连与镜像均失败")
+                return FetchedSource(name=name, url=url, raw_content=content)
+            # 通用 HTTP（含 pages.dev / base64 / clash / singbox 订阅）
+            content = await self._get_with_mirrors(url)
+            name = url.rstrip('/').split('/')[-1].split('?')[0][:60] or f"http-{url[:30]}"
+            if content is None:
+                return FetchedSource(name=name, url=url, error="HTTP 抓取失败")
+            return FetchedSource(name=name, url=url, raw_content=content)
+        except Exception as e:
+            return FetchedSource(name=url, url=url, error=str(e))
+
+    async def _github_raw_content(self, repo_url: str) -> Optional[str]:
+        """github.com blob URL → raw URL，再走镜像回退链"""
+        url = repo_url
+        if "github.com" in repo_url and "/raw/" not in repo_url and "raw.githubusercontent.com" not in repo_url:
+            match = re.search(r'github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)', repo_url)
+            if match:
+                user, repo, branch, path = match.groups()
+                url = f"https://raw.githubusercontent.com/{user}/{repo}/refs/heads/{branch}/{path}"
+        return await self._get_with_mirrors(url)
 
     async def close(self):
         await self.client.aclose()

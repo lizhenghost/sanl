@@ -140,8 +140,9 @@ class SingleNodeForm(BaseModel):
 
 @api_router.post("/nodes/import")
 async def import_nodes(req: NodeImportRequest):
-    """批量手动导入节点：支持多行协议链接 / Clash YAML / Base64 订阅内容"""
+    """批量手动导入节点：支持多行协议链接 / Clash YAML / sing-box JSON / Base64 订阅内容"""
     from .importer import parse_content
+    from ..schema.repository import node_fingerprint, get_connection
     result = parse_content(req.content)
     if not result["nodes"]:
         raise HTTPException(status_code=400, detail="；".join(result["errors"]) or "无可识别的节点")
@@ -150,10 +151,13 @@ async def import_nodes(req: NodeImportRequest):
     imported, skipped = 0, 0
     for ntype, data, name in result["nodes"]:
         try:
-            # 同源同名同地址去重
-            existing = repository.list_nodes(source_type="manual", limit=5000)
-            if any(n.node_name == name and (n.node_data or {}).get("server") == data.get("server")
-                   for n in existing):
+            # 指纹去重（同类型+服务器+端口+凭据视为同一节点）
+            fp = node_fingerprint(ntype, data)
+            with get_connection() as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM nodes WHERE fingerprint = ?", (fp,)
+                ).fetchone()
+            if exists:
                 skipped += 1
                 continue
             repository.add_node(
@@ -185,6 +189,43 @@ async def import_single_node(form: SingleNodeForm):
         status="active"
     )
     return {"status": "ok", "name": name, "type": ntype}
+
+
+# ===== 全源池导入 / CF 优选端点 =====
+
+@api_router.post("/sources/import-all")
+async def import_all_sources():
+    """手动触发全量池导入：抓取所有启用源 → 解析 → 指纹去重入库（后台异步执行）"""
+    import asyncio
+    from ..scheduler.pool_importer import run_pool_import
+
+    async def _job():
+        try:
+            summary = await run_pool_import()
+            logger.info(f"手动全量导入完成: {summary}")
+        except Exception as e:
+            logger.error(f"手动全量导入失败: {e}")
+
+    asyncio.create_task(_job())
+    return {"status": "started", "message": "全量导入已在后台启动，稍后刷新页面查看各源节点数"}
+
+
+@api_router.post("/sources/{source_id}/reimport")
+async def reimport_single_source(source_id: int):
+    """单源重新导入（同步执行，返回导入统计）"""
+    from ..scheduler.pool_importer import run_pool_import
+    source = repository.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    summary = await run_pool_import(source_id=source_id)
+    return {"status": "ok", "source": source.name, **summary}
+
+
+@api_router.get("/cf/endpoints")
+async def list_cf_endpoints(limit: int = Query(2000, le=20000)):
+    """CF 优选 IP/域名端点列表（host:port，独立于代理节点）"""
+    items = repository.get_cf_endpoints(limit=limit)
+    return {"total": repository.count_cf_endpoints(), "endpoints": items}
 
 
 # ===== 节点接口 =====
@@ -252,26 +293,33 @@ async def node_stats():
 
 @api_router.get("/nodes/subscribe")
 async def get_subscribe(
-    fmt: str = Query("clash", pattern="^(clash|singbox|v2ray|base64|txt)$"),
-    limit: int = Query(200, le=2000),
+    fmt: str = Query("clash", pattern="^(clash|clash-meta|singbox|v2ray|base64|txt|mixed|surge|loon|qx)$"),
+    limit: int = Query(5000, le=20000),
     min_score: float = Query(0, ge=0, le=100),
     min_speed: Optional[float] = Query(None, ge=0, description="最低速度 KB/s"),
     max_latency: Optional[int] = Query(None, ge=0, description="最大延迟 ms"),
     country: Optional[str] = Query(None),
-    src: Optional[str] = Query(None, pattern="^(manual|auto)$", description="来源筛选")
+    src: Optional[str] = Query(None, pattern="^(manual|auto)$", description="来源筛选"),
+    proto: Optional[str] = Query(None, description="协议过滤：ss/vmess/vless/trojan/hysteria2/tuic/..."),
+    status: str = Query("active", pattern="^(active|all|unknown)$", description="导出范围：active=仅可用，all=全池")
 ):
-    """获取多格式订阅链接（支持 min_speed/max_latency 筛选，方案 4.3 节）"""
-    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64, generate_txt
+    """获取多格式订阅链接（10 种格式 × 协议/状态/速度/延迟多维筛选）"""
+    from .subscribe import generate_by_format, EXPORT_CONTENT_TYPES
 
-    # 获取活跃节点，按评分降序（src: manual=手动导入, auto=系统抓取, None=聚合全部）
-    nodes = repository.get_ranking(
-        limit=limit,
-        country=country,
-        min_score=min_score,
-        source_type=src
-    )
+    if status == "all":
+        # 全池导出（含 unknown/inactive），按评分降序、未测节点殿后
+        nodes = repository.list_nodes(
+            limit=limit, country=country, node_type=proto,
+            sort="score", order="desc", source_type=src
+        )
+    else:
+        # 活跃节点按评分降序
+        nodes = repository.get_ranking(
+            limit=limit, country=country, min_score=min_score,
+            node_type=proto, source_type=src
+        )
 
-    # 内存过滤 min_speed / max_latency（ranking 不支持的维度）
+    # 内存过滤 min_speed / max_latency
     if min_speed is not None:
         nodes = [n for n in nodes if (n.download_speed or 0) >= min_speed * 1024]
     if max_latency is not None:
@@ -280,27 +328,11 @@ async def get_subscribe(
     if not nodes:
         raise HTTPException(status_code=404, detail="No nodes available")
 
-    generators = {
-        "clash": generate_clash,
-        "v2ray": generate_v2ray,
-        "singbox": generate_singbox,
-        "base64": generate_base64,
-        "txt": generate_txt,
-    }
-
-    content = generators[fmt](nodes)
-
-    media_types = {
-        "clash": "text/plain; charset=utf-8",
-        "v2ray": "text/plain; charset=utf-8",
-        "singbox": "application/json; charset=utf-8",
-        "base64": "text/plain; charset=utf-8",
-        "txt": "text/plain; charset=utf-8",
-    }
+    content = generate_by_format(fmt, nodes)
 
     return Response(
         content=content,
-        media_type=media_types.get(fmt, "text/plain"),
+        media_type=EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
         headers={"Cache-Control": "no-cache"}
     )
 
@@ -313,23 +345,33 @@ async def get_subscribe(
 async def subscribe_by_token(
     token: str,
     fmt: str,
-    limit: int = Query(200, le=2000),
+    limit: int = Query(5000, le=20000),
     min_score: float = Query(0, ge=0, le=100),
     min_speed: Optional[float] = Query(None, ge=0),
     max_latency: Optional[int] = Query(None, ge=0),
     country: Optional[str] = Query(None),
-    src: Optional[str] = Query(None, pattern="^(manual|auto)$")
+    src: Optional[str] = Query(None, pattern="^(manual|auto)$"),
+    proto: Optional[str] = Query(None, description="协议过滤"),
+    status: str = Query("active", pattern="^(active|all|unknown)$")
 ):
-    """Token 鉴权订阅输出：/sub/np_xxx/clash?v2ray|singbox|base64|txt
-    支持筛选参数 min_speed/max_latency/src（聚合手动+系统全部节点）"""
-    from .subscribe import generate_clash, generate_v2ray, generate_singbox, generate_base64, generate_txt
+    """Token 鉴权订阅输出：/sub/{token}/{clash|clash-meta|singbox|v2ray|base64|txt|mixed|surge|loon|qx}"""
+    from .subscribe import generate_by_format, EXPORT_CONTENT_TYPES
 
     # Token 校验（无效/禁用/过期 → 401）
     info = repository.validate_token(token)
     if not info:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    nodes = repository.get_ranking(limit=limit, country=country, min_score=min_score, source_type=src)
+    if status == "all":
+        nodes = repository.list_nodes(
+            limit=limit, country=country, node_type=proto,
+            sort="score", order="desc", source_type=src
+        )
+    else:
+        nodes = repository.get_ranking(
+            limit=limit, country=country, min_score=min_score,
+            node_type=proto, source_type=src
+        )
     if min_speed is not None:
         nodes = [n for n in nodes if (n.download_speed or 0) >= min_speed * 1024]
     if max_latency is not None:
@@ -338,15 +380,14 @@ async def subscribe_by_token(
     if not nodes:
         raise HTTPException(status_code=404, detail="No nodes available")
 
-    generators = {"clash": generate_clash, "v2ray": generate_v2ray,
-                  "singbox": generate_singbox, "base64": generate_base64,
-                  "txt": generate_txt}
-    if fmt not in generators:
-        raise HTTPException(status_code=400, detail="fmt must be clash|v2ray|singbox|base64|txt")
+    try:
+        content = generate_by_format(fmt, nodes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     return Response(
-        content=generators[fmt](nodes),
-        media_type="text/plain; charset=utf-8",
+        content=content,
+        media_type=EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
         headers={"Cache-Control": "no-cache", "profile-update-interval": "6"}
     )
 
@@ -428,44 +469,25 @@ async def stats_trend(limit: int = Query(30, le=100)):
 
 @api_router.post("/sources/{source_id}/fetch")
 async def fetch_single_source(source_id: int, trigger_check: bool = False):
-    """手动触发单源抓取验证（方案核心 API：POST /api/sources/{id}/fetch）
-    验证源可达性并更新健康度；trigger_check=true 时同时触发全量测速拉取新源节点"""
+    """手动触发单源抓取+导入（指纹去重入库）；trigger_check=true 时同时触发全量测速"""
     source = repository.get_source(source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
     if not source.enabled:
         raise HTTPException(status_code=400, detail="Source is disabled")
 
-    from ..scraper.scraper import Scraper
-    scraper = Scraper()
+    from ..scheduler.pool_importer import run_pool_import
     try:
-        fetched = await scraper.fetch_all()
-        target = next((s for s in fetched if s.url == source.url or s.name == source.name), None)
-        if not target:
-            target = next((s for s in fetched if source.url in s.url or s.url in source.url), None)
-        
-        if target and target.raw_content:
-            ok = len(target.raw_content) > 50
-            if ok:
-                repository.record_source_success(source_id)
-                from .importer import parse_content
-                parsed_count = len(parse_content(target.raw_content).get("nodes", []))
-                repository.update_source_status(source_id, 0, parsed_count)
-                result = {"status": "ok", "size": len(target.raw_content), "nodes": parsed_count}
-            else:
-                repository.record_source_failure(source_id)
-                result = {"status": "unhealthy", "error": "empty content"}
-        elif target and target.error:
-            repository.record_source_failure(source_id)
-            result = {"status": "failed", "error": target.error[:200]}
+        summary = await run_pool_import(source_id=source_id)
+        if summary["sources_ok"] > 0:
+            result = {"status": "ok", "parsed": summary["parsed"],
+                      "inserted": summary["inserted"], "updated": summary["updated"],
+                      "cf_endpoints": summary["cf_endpoints"]}
         else:
-            repository.record_source_failure(source_id)
-            result = {"status": "failed", "error": "source not found in scraper"}
+            result = {"status": "failed",
+                      "error": (summary["errors"][0] if summary["errors"] else "unknown")}
     except Exception as e:
-        repository.record_source_failure(source_id)
         result = {"status": "failed", "error": str(e)[:200]}
-    finally:
-        await scraper.close()
 
     if trigger_check and result.get("status") == "ok":
         import asyncio

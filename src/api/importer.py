@@ -378,13 +378,21 @@ def parse_host_port(line: str) -> Tuple[str, dict, str]:
     else:
         host, port = line, 443
 
-    if not (host and 0 < port < 65536):
+    if not (host and 0 < port < 65536 and _is_valid_endpoint_host(host)):
         raise ValueError("host/port 无效")
 
     # 构造为 trojan://random@host:port?security=tls#remark
     password = _random_password(18)
     uri = f"trojan://{password}@{host}:{port}?security=tls#{remark}"
     return parse_trojan(uri)
+
+
+_DOMAIN_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$', re.IGNORECASE)
+
+
+def _is_valid_endpoint_host(host: str) -> bool:
+    """CF 优选端点 host 必须是合法域名或 IPv4（拒绝 cf- 这类残片）"""
+    return bool(_is_ipv4(host) or _DOMAIN_RE.match(host))
 
 
 # ---------- Clash YAML ----------
@@ -401,27 +409,125 @@ def _from_clash_proxies(proxies: list) -> List[Tuple[str, dict, str]]:
     return out
 
 
+# ---------- Sing-box JSON ----------
+
+_SBOX_TYPE_MAP = {
+    "shadowsocks": "ss", "shadowsocksr": "ssr", "vmess": "vmess",
+    "vless": "vless", "trojan": "trojan", "hysteria2": "hysteria2",
+    "hysteria": "hysteria", "tuic": "tuic", "socks": "socks5", "http": "http",
+}
+_SBOX_SKIP_TYPES = {"direct", "block", "dns", "selector", "urltest", "ssh", ""}
+
+
+def _from_singbox_outbounds(outbounds: list) -> List[Tuple[str, dict, str]]:
+    """sing-box outbounds 列表 → 统一元组（node_data 转为 Clash 风格内部格式）"""
+    out = []
+    for ob in outbounds or []:
+        if not isinstance(ob, dict):
+            continue
+        stype = str(ob.get("type", "")).lower()
+        if stype in _SBOX_SKIP_TYPES or not ob.get("server"):
+            continue
+        ntype = _SBOX_TYPE_MAP.get(stype)
+        if not ntype:
+            continue
+        data = {
+            "server": str(ob.get("server", "")),
+            "port": int(ob.get("server_port", 443) or 443),
+            "udp": True,
+        }
+        if ntype in ("ss", "ssr"):
+            data["cipher"] = ob.get("method", "aes-128-gcm")
+            data["password"] = ob.get("password", "")
+            if ntype == "ssr":
+                data["protocol"] = ob.get("protocol", "origin")
+                data["obfs"] = ob.get("obfs", "plain")
+                if ob.get("obfs_param"): data["obfs-param"] = ob["obfs_param"]
+                if ob.get("protocol_param"): data["protocol-param"] = ob["protocol_param"]
+        elif ntype == "vmess":
+            data["uuid"] = ob.get("uuid", "")
+            data["alterId"] = int(ob.get("alter_id", 0) or 0)
+            data["cipher"] = ob.get("security", "auto")
+        elif ntype == "vless":
+            data["uuid"] = ob.get("uuid", "")
+            if ob.get("flow"): data["flow"] = ob["flow"]
+        elif ntype in ("trojan", "hysteria2"):
+            data["password"] = ob.get("password", "")
+        elif ntype == "hysteria":
+            data["auth-str"] = ob.get("auth_str", ob.get("password", ""))
+            if ob.get("up_mbps"): data["up-speed"] = ob["up_mbps"]
+            if ob.get("down_mbps"): data["down-speed"] = ob["down_mbps"]
+        elif ntype == "tuic":
+            data["uuid"] = ob.get("uuid", "")
+            data["password"] = ob.get("password", "")
+        elif ntype in ("socks5", "http"):
+            if ob.get("username"): data["username"] = ob["username"]
+            if ob.get("password"): data["password"] = ob["password"]
+        # TLS
+        tls = ob.get("tls") or {}
+        if isinstance(tls, dict):
+            if tls.get("enabled"):
+                data["tls"] = True
+            if tls.get("server_name"): data["sni"] = tls["server_name"]
+            if tls.get("alpn"): data["alpn"] = tls["alpn"]
+            if tls.get("insecure"): data["skip-cert-verify"] = True
+            reality = tls.get("reality") or {}
+            if isinstance(reality, dict) and reality.get("enabled"):
+                data["reality-opts"] = {k: reality[k] for k in ("public_key", "short_id") if k in reality}
+                if reality.get("public_key"):
+                    data["reality-opts"]["pbk"] = reality["public_key"]
+                if reality.get("short_id"):
+                    data["reality-opts"]["sid"] = reality["short_id"]
+        # 传输层
+        tr = ob.get("transport") or {}
+        if isinstance(tr, dict) and tr.get("type"):
+            net = str(tr["type"]).lower()
+            if net in ("ws", "http"):
+                data["network"] = "ws" if net == "ws" else "h2"
+                if tr.get("path"): data["ws-path"] = tr["path"]
+                host = (tr.get("headers") or {}).get("Host") or tr.get("host")
+                if host:
+                    data["servername"] = host if isinstance(host, str) else host[0]
+            elif net == "grpc":
+                data["network"] = "grpc"
+                if tr.get("service_name"): data["grpc-service-name"] = tr["service_name"]
+        name = str(ob.get("tag", "") or f"{ntype.upper()}-{data['server']}")
+        out.append((ntype, data, name))
+    return out
+
+
 # ---------- 总入口 ----------
 
-def parse_content(content: str) -> dict:
+def parse_content(content: str, cf_as_nodes: bool = True) -> dict:
     """
-    解析任意粘贴内容，返回 {nodes: [(type, data, name)], errors: [str]}
-    自动识别：多行链接 / Clash YAML / 整段 Base64 订阅
+    解析任意粘贴内容，返回 {nodes: [(type, data, name)], cf_endpoints: [{host,port,remark}], errors: [str]}
+    自动识别：多行链接 / Clash YAML / sing-box JSON / 整段 Base64 订阅 / host:port CF优选列表
+    cf_as_nodes=False 时，CF 优选行不伪装成 trojan 节点，而是进入 cf_endpoints（池导入用）
     """
     content = (content or "").strip()
     if not content:
-        return {"nodes": [], "errors": ["内容为空"]}
+        return {"nodes": [], "cf_endpoints": [], "errors": ["内容为空"]}
 
-    results, errors = [], []
+    results, errors, cf_list = [], [], []
 
-    # 1) Clash YAML（含 proxies 键）
-    if "proxies:" in content:
+    # 0.5) sing-box JSON
+    stripped = content.strip()
+    if stripped.startswith("{") and '"outbounds"' in stripped:
+        try:
+            doc = json.loads(stripped)
+            got = _from_singbox_outbounds(doc.get("outbounds"))
+            if got:
+                return {"nodes": got, "cf_endpoints": [], "errors": errors}
+        except Exception as e:
+            errors.append(f"sing-box JSON 解析失败: {e}")
+
+    # 1) Clash YAML（含 proxies 键）    if "proxies:" in content:
         try:
             doc = yaml.safe_load(content)
             if isinstance(doc, dict) and doc.get("proxies"):
                 got = _from_clash_proxies(doc["proxies"])
                 if got:
-                    return {"nodes": got, "errors": errors}
+                    return {"nodes": got, "cf_endpoints": [], "errors": errors}
         except Exception as e:
             errors.append(f"YAML 解析失败: {e}")
 
@@ -433,7 +539,7 @@ def parse_content(content: str) -> dict:
             if isinstance(arr, list) and arr and all(isinstance(x, dict) and x.get("server") for x in arr):
                 got = _from_clash_proxies(arr)
                 if got:
-                    return {"nodes": got, "errors": errors}
+                    return {"nodes": got, "cf_endpoints": [], "errors": errors}
         except Exception as e:
             errors.append(f"JSON 解析失败: {e}")
 
@@ -466,27 +572,43 @@ def parse_content(content: str) -> dict:
 
         # 2.3) 无协议前缀的 host:port#remark / host#remark（CF 优选格式）
         try:
-            results.append(parse_host_port(line))
+            _body = line.split("#", 1)[0].strip()
+            _remark = line.split("#", 1)[1].strip() if "#" in line else ""
+            if ":" in _body:
+                _host, _p = _body.rsplit(":", 1)
+                _port = int(_p) if _p.isdigit() else 443
+            else:
+                _host, _port = _body, 443
+            if _is_valid_endpoint_host(_host) and 0 < _port < 65536:
+                if cf_as_nodes:
+                    results.append(parse_host_port(line))
+                else:
+                    cf_list.append({"host": _host, "port": _port,
+                                    "remark": _remark or f"优选-{_host}"})
+            else:
+                raise ValueError("host/port 无效")
             parsed_any = True
             continue
         except Exception as e:
             errors.append(f"行解析失败: {line[:40]}... ({e})")
 
     if parsed_any:
-        return {"nodes": results, "errors": errors}
+        return {"nodes": results, "cf_endpoints": cf_list, "errors": errors}
 
     # 3) 整段 Base64 订阅
     try:
         decoded = _b64decode(content).decode("utf-8", "ignore")
         if any(decoded.strip().lower().startswith(p) for p in SUPPORTED_PREFIXES):
             inner = parse_content(decoded)
-            return {"nodes": inner["nodes"], "errors": errors + inner["errors"]}
+            merged_cf = cf_list + (inner.get("cf_endpoints") or [])
+            return {"nodes": inner["nodes"], "cf_endpoints": merged_cf, "errors": errors + inner["errors"]}
     except Exception:
         pass
 
     if not results:
-        errors.append("无法识别内容格式（支持 ss/vmess/vless/trojan/hysteria2/tuic 链接、Clash YAML、Base64 订阅）")
-    return {"nodes": results, "errors": errors}
+        if not cf_list:
+            errors.append("无法识别内容格式（支持 ss/vmess/vless/trojan/hysteria2/tuic 链接、Clash/sing-box 订阅、Base64、host:port 列表）")
+    return {"nodes": results, "cf_endpoints": cf_list, "errors": errors}
 
 
 # ---------- 单节点表单 → URI/数据 ----------

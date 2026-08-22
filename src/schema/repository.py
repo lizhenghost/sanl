@@ -24,7 +24,194 @@ def _migrate(conn):
     add_column("nodes", "fail_count", "INTEGER NOT NULL DEFAULT 0")
     add_column("sources", "fail_count", "INTEGER NOT NULL DEFAULT 0")
     add_column("sources", "category", "TEXT DEFAULT 'free'")
+    add_column("nodes", "fingerprint", "TEXT")
+    add_column("nodes", "last_seen_at", "INTEGER")
+
+    # 回填历史行的节点指纹（NULL 指纹会让 NOT IN 失效、造成重复插入）
+    null_rows = conn.execute(
+        "SELECT id, node_type, node_data FROM nodes WHERE fingerprint IS NULL"
+    ).fetchall()
+    if null_rows:
+        for r in null_rows:
+            try:
+                data = json.loads(r["node_data"] or "{}")
+                fp = node_fingerprint(r["node_type"], data)
+            except Exception:
+                continue
+            dup = conn.execute(
+                "SELECT id FROM nodes WHERE fingerprint = ? AND id != ?", (fp, r["id"])
+            ).fetchone()
+            if dup:
+                # 同指纹重复行：保留较小 id，删除较大 id
+                keep_id, drop_id = min(dup["id"], r["id"]), max(dup["id"], r["id"])
+                conn.execute("DELETE FROM nodes WHERE id = ?", (drop_id,))
+                conn.execute("UPDATE nodes SET fingerprint = ? WHERE id = ?", (fp, keep_id))
+            else:
+                conn.execute("UPDATE nodes SET fingerprint = ? WHERE id = ?", (fp, r["id"]))
+        conn.commit()
+
+    # 节点指纹唯一索引（回填后清理历史重复行：同指纹保留最小 id）
+    conn.execute("""
+        DELETE FROM nodes WHERE fingerprint IS NOT NULL AND id NOT IN (
+            SELECT MIN(id) FROM nodes WHERE fingerprint IS NOT NULL GROUP BY fingerprint
+        )
+    """)
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_fingerprint ON nodes(fingerprint)")
+
+    # CF 优选端点表（ip/domain:port 列表，非代理节点，独立管理）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cf_endpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 443,
+            remark TEXT,
+            source_id INTEGER,
+            last_seen_at INTEGER,
+            UNIQUE(host, port)
+        )
+    """)
     conn.commit()
+
+
+# ===== 节点指纹 / 批量 Upsert =====
+
+def node_fingerprint(node_type: str, data: dict) -> str:
+    """稳定唯一键：type|server|port|凭据 —— 用于跨源去重与测试结果回填"""
+    t = (node_type or "").lower().strip()
+    server = str(data.get("server", "")).strip().lower()
+    port = int(data.get("port", 0) or 0)
+    cred = (data.get("password") or data.get("uuid") or data.get("public-key")
+            or data.get("psk") or data.get("auth-str") or "")
+    if not cred and t in ("ss", "ssr"):
+        cred = f"{data.get('cipher', data.get('method', ''))}:{data.get('password', '')}"
+    if t in ("socks5", "socks", "http") and not cred:
+        cred = f"{data.get('username', '')}:{data.get('password', '')}"
+    raw = f"{t}|{server}|{port}|{cred}"
+    import hashlib
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def upsert_nodes_bulk(items: List[dict]) -> dict:
+    """
+    批量写入节点（单事务，池导入专用）。
+    items: [{subscribe_url, source_id, node_name, node_type, node_data}]
+    返回 {inserted, updated}（以事务前后总行数差判定新插入数）
+    """
+    now = int(__import__('time').time())
+    with get_connection() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        for it in items:
+            fp = node_fingerprint(it["node_type"], it["node_data"])
+            conn.execute(
+                """INSERT INTO nodes (subscribe_url, source_id, node_name, node_type,
+                                      node_data, status, fingerprint, last_seen_at)
+                   VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?)
+                   ON CONFLICT(fingerprint) DO UPDATE SET
+                       source_id   = excluded.source_id,
+                       subscribe_url = excluded.subscribe_url,
+                       node_name   = CASE WHEN excluded.node_name != '' THEN excluded.node_name ELSE nodes.node_name END,
+                       node_data   = excluded.node_data,
+                       last_seen_at = excluded.last_seen_at""",
+                (it["subscribe_url"], it["source_id"], it["node_name"],
+                 it["node_type"], json.dumps(it["node_data"]), fp, now)
+            )
+        after = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        conn.commit()
+    inserted = max(0, after - before)
+    return {"inserted": inserted, "updated": max(0, len(items) - inserted)}
+
+
+def mark_missing_inactive(active_fps: set, include_manual: bool = False):
+    """把不在 active_fps 里的节点置为 inactive（默认只处理自动抓取节点，手动导入永不降级）"""
+    if not active_fps:
+        return 0
+    fps = list(active_fps)[:20000]
+    placeholders = ",".join("?" * len(fps))
+    manual_filter = "" if include_manual else \
+        " AND (source_id IS NULL OR source_id NOT IN (SELECT id FROM sources WHERE source_type = 'manual'))"
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"""UPDATE nodes SET status = 'inactive', updated_at = ?
+                WHERE status IN ('active') AND fingerprint NOT IN ({placeholders}){manual_filter}""",
+            [int(__import__('time').time())] + fps
+        )
+        n = cur.rowcount
+        conn.commit()
+    return n
+
+
+def apply_check_results(results: List[dict]) -> dict:
+    """
+    测速结果回填（不删任何节点）。
+    results: [{node_type, node_data, node_name, download_speed?, latency?, country?}]
+    来自 subs-check all.yaml 的存活节点。匹配指纹 → status=active + 指标更新；
+    未匹配的旧 active → inactive（仅 auto 源，手动导入永不降级）。
+    返回 {alive, marked_inactive}
+    """
+    now = int(__import__('time').time())
+    alive = len(results)
+    with get_connection() as conn:
+        for r in results:
+            fp = node_fingerprint(r["node_type"], r["node_data"])
+            conn.execute(
+                """INSERT INTO nodes (subscribe_url, source_id, node_name, node_type, node_data,
+                                      status, fingerprint, download_speed, latency, country,
+                                      last_checked_at, last_seen_at)
+                   VALUES ('subs-check://alive', NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(fingerprint) DO UPDATE SET
+                       status = 'active',
+                       fail_count = 0,
+                       node_name = CASE WHEN excluded.node_name != '' THEN excluded.node_name ELSE nodes.node_name END,
+                       download_speed = COALESCE(excluded.download_speed, nodes.download_speed),
+                       latency = COALESCE(excluded.latency, nodes.latency),
+                       country = COALESCE(excluded.country, nodes.country),
+                       last_checked_at = excluded.last_checked_at,
+                       last_seen_at = excluded.last_seen_at""",
+                (r.get("node_name", ""), r["node_type"], json.dumps(r["node_data"]), fp,
+                 r.get("download_speed"), r.get("latency"), r.get("country"), now, now)
+            )
+        conn.commit()
+
+    fps = {node_fingerprint(r["node_type"], r["node_data"]) for r in results}
+    marked = mark_missing_inactive(fps)
+    return {"alive": alive, "marked_inactive": marked}
+
+
+def get_cf_endpoints(limit: int = 5000) -> list:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT host, port, remark, source_id, last_seen_at FROM cf_endpoints ORDER BY id LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None) -> int:
+    """items: [{host, port, remark}]"""
+    now = int(__import__('time').time())
+    n = 0
+    with get_connection() as conn:
+        for it in items:
+            try:
+                conn.execute(
+                    """INSERT INTO cf_endpoints (host, port, remark, source_id, last_seen_at)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(host, port) DO UPDATE SET
+                           remark = CASE WHEN excluded.remark != '' THEN excluded.remark ELSE cf_endpoints.remark END,
+                           source_id = excluded.source_id,
+                           last_seen_at = excluded.last_seen_at""",
+                    (it["host"], int(it.get("port", 443)), it.get("remark", ""), source_id, now)
+                )
+                n += 1
+            except Exception:
+                continue
+        conn.commit()
+    return n
+
+
+def count_cf_endpoints() -> int:
+    with get_connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM cf_endpoints").fetchone()[0]
 
 
 def init_db():

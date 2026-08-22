@@ -52,6 +52,8 @@ class Node:
     last_checked_at: Optional[int] = None
     created_at: Optional[int] = None
     updated_at: Optional[int] = None
+    fingerprint: Optional[str] = None
+    last_seen_at: Optional[int] = None
 
 
 @dataclass

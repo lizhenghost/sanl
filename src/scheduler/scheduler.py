@@ -82,32 +82,11 @@ class Scheduler:
         }
 
     async def _fetch_sources(self):
-        """抓取数据源：遍历 DB 启用源逐个验证 + 记录健康度（附录 G 防劣化）"""
-        logger.info("Starting source fetch...")
+        """抓取数据源：遍历 DB 启用源 → 抓取+解析+节点入库（指纹去重）→ 记录健康度"""
+        logger.info("Starting source fetch (pool import)...")
         try:
-            results = await self.scraper.fetch_all()
-            existing = repository.list_sources(enabled_only=False)
-            existing_urls = {s.url: s for s in existing}
-
-            for result in results:
-                db_src = existing_urls.get(result.url)
-                if result.error:
-                    logger.warning(f"Failed to fetch {result.name}: {result.error}")
-                    if db_src:
-                        repository.record_source_failure(db_src.id)
-                    continue
-
-                if db_src:
-                    repository.record_source_success(db_src.id)
-                    repository.update_source_status(db_src.id, 0)
-                    logger.info(f"Source healthy: {result.name}")
-                else:
-                    repository.add_source(
-                        name=result.name,
-                        url=result.url,
-                        source_type="github" if "github" in result.url else "unknown"
-                    )
-                    logger.info(f"Added new source: {result.name}")
+            from .pool_importer import run_pool_import
+            await run_pool_import(scraper=self.scraper)
         except Exception as e:
             logger.error(f"Fetch failed: {e}")
 

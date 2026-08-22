@@ -1,11 +1,17 @@
 # sanl (NodePool) 项目进度报告
 
-**更新时间**: 2026-08-21 UTC
+**更新时间**: 2026-08-22 UTC
 **项目名**: sanl
-**方案版本**: v2.1 + 全协议扩展（2026-08-21 本轮）
-**域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，公网 200 ✅）
-**服务**: http://127.0.0.1:8899（PID 2915）
-**GitHub**: https://github.com/lizhengost/sanl（Public, tag v2.1.0）
+**方案版本**: v2.1 + 全协议扩展 + 竞态修复（2026-08-22 本轮）
+**域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，HTTPS 200 ✅，HTTP 自动 301 → HTTPS ✅）
+**服务**: http://127.0.0.1:8899（PID 3639，707 节点 / 38 国）
+**GitHub**: https://github.com/lizhenghost/sanl（本地最新 a2aad95 待推：旧 PAT 已撤销）
+
+## 2026-08-22 本轮修复（a2aad95）
+- **根因**：「数据源加载失败: Cannot set properties of null」= 前端异步竞态——在「数据源」页发起的 fetch 未返回时切到其他页面，回调往已销毁 DOM 写 innerHTML 抛 null 错误并弹误导性 toast。
+- **修复**：loadSources/loadCheckHistory/loadDashboard/loadMapData/loadTokens/renderNodeTable/renderNodePage/filterNodes/drawPieChart/drawBarChart 全部加页面切换守卫；loadCheckHistory 文案改为「测速记录加载失败」。
+- **HTTPS**：nginx 增加 `X-Forwarded-Proto = http → 301 https` 强制跳转；Cloudflare 边缘证书（Google Trust Services, *.kdns.fr）本就自动可用，https:// 直达。
+- **回归**：无头浏览器全页面快速连切无报错弹窗；世界地图正常渲染（38 国/701 定位/707 总节点）。
 
 ---
 

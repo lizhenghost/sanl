@@ -71,18 +71,36 @@ class Checker:
         with open(self.config_path, 'r') as f:
             config = yaml.safe_load(f) or {}
 
-        # 过滤掉 manual:// 协议源（subs-check 不支持该协议，会重试3次报错浪费时间）
-        config['sub-urls'] = [src.url for src in sources if not src.url.startswith('manual://')]
+        # subs-check 只吃真实代理订阅：
+        # - manual:// 手动导入源不支持
+        # - data:/static 与 cf-list 类型是 CF 优选 host:port 列表，不是代理节点，喂进去只会浪费时间
+        remote_urls = [
+            src.url for src in sources
+            if not src.url.startswith('manual://')
+            and not src.url.startswith('data:')
+            and (getattr(src, 'source_type', '') or '').lower() not in ('cf-list', 'static')
+        ]
+        config['sub-urls'] = remote_urls
 
         with open(self.config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
-        logger.info(f"Updated subs-check config with {len(config['sub-urls'])} remote sources")
+        logger.info(f"Updated subs-check config with {len(remote_urls)} remote sources")
+
+    def _kill_stale_processes(self):
+        """清理上一轮残留的 subs-check 孤儿进程（后端重启会遗留进程占用 API 端口）"""
+        try:
+            subprocess.run(["pkill", "-f", "subs-check"], capture_output=True, timeout=5)
+            time.sleep(1.0)
+        except Exception as e:
+            logger.warning(f"pkill subs-check failed: {e}")
 
     async def _run_subs_check(self) -> Dict:
         """运行 subs-check（后台运行，轮询输出文件，因为 subs-check 作为守护进程不会自动退出）"""
+        process = None
         try:
             os.makedirs(self.output_dir, exist_ok=True)
+            self._kill_stale_processes()
 
             # 关键：删除上一轮的旧结果文件，否则轮询会立即误判"已完成"并读旧数据
             result_file = os.path.join(self.output_dir, "all.yaml")
@@ -95,13 +113,14 @@ class Checker:
                     pass
             start_ts = time.time()
 
-            # 启动 subs-check，日志重定向到文件
+            # 启动 subs-check（独立进程组，便于整组清理），日志重定向到文件
             process = await asyncio.create_subprocess_exec(
                 self.binary_path,
                 "-f", self.config_path,
                 stdout=open("/tmp/subs-check.log", "a"),
                 stderr=open("/tmp/subs-check.log", "a"),
-                cwd=os.path.dirname(os.path.abspath(self.binary_path))
+                cwd=os.path.dirname(os.path.abspath(self.binary_path)),
+                start_new_session=True,
             )
 
             max_wait = 5400  # 90 分钟
@@ -120,18 +139,32 @@ class Checker:
                         and os.path.getmtime(result_file) > start_ts):
                     # 等 60 秒确保写入完成
                     await asyncio.sleep(60)
-                    process.kill()
-                    await process.wait()
+                    self._terminate(process)
                     return await self._read_results()
 
-            process.kill()
-            await process.wait()
+            self._terminate(process)
             return {"success": False, "error": f"Timeout after {max_wait}s"}
 
         except FileNotFoundError:
             return {"success": False, "error": f"subs-check binary not found: {self.binary_path}"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            if process is not None and process.returncode is None:
+                self._terminate(process)
+
+    @staticmethod
+    def _terminate(process):
+        """杀掉子进程及其整个进程组（start_new_session 的子进程用 killpg 才能全灭）"""
+        try:
+            os.killpg(os.getpgid(process.pid), 15)
+        except (ProcessLookupError, PermissionError):
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        except Exception:
+            pass
 
     async def _read_results(self) -> Dict:
         """读取 subs-check 输出结果"""
@@ -176,7 +209,7 @@ class Checker:
             return {"success": False, "error": f"Failed to read results: {e}"}
 
     async def _parse_and_store_results(self, result: Dict):
-        """解析结果并存储到数据库"""
+        """解析结果并回填数据库（指纹匹配 upsert，绝不删库；手动导入节点永不受影响）"""
         import yaml
         import re
 
@@ -185,76 +218,60 @@ class Checker:
             return
 
         with open(result_path, 'r') as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
 
         proxies = data.get('proxies', [])
-        logger.info(f"Parsing {len(proxies)} proxies from result")
+        logger.info(f"Parsing {len(proxies)} alive proxies (upsert mode, no wipe)")
 
-        sources = repository.list_sources(enabled_only=True)
-        source_url = sources[0].url if sources else ''
-        source_id = sources[0].id if sources else None
-
-        from src.schema.repository import get_connection
-        with get_connection() as conn:
-            conn.execute("DELETE FROM nodes")
-
-        added = 0
+        results = []
         for proxy in proxies:
-            name = proxy.get('name', '')
-            ptype = proxy.get('type', 'unknown')
+            name = str(proxy.get('name', ''))
+            ptype = str(proxy.get('type', 'unknown')).lower()
+            if not proxy.get('server'):
+                continue
 
-            country = None
+            # subs-check 命名格式: 国家|速度|延迟|名称 —— 提取测速指标
+            download_speed, latency, country = None, None, None
             if '|' in name:
-                country_part = name.split('|')[0]
-                emoji_match = re.search(r'[\U0001F1E6-\U0001F1FF]{2}', country_part)
+                parts = [p.strip() for p in name.split('|')]
+                emoji_match = re.search(r'[\U0001F1E6-\U0001F1FF]{2}', parts[0])
                 if emoji_match:
                     country = emoji_match.group(0)
-
-            latency = None
-            download_speed = None
-            if '|' in name:
-                parts = name.split('|')
-                if len(parts) >= 2:
-                    speed_str = parts[1].strip()
-                    if 'KB/s' in speed_str:
+                for p in parts[1:3]:
+                    if p.endswith('KB/s'):
                         try:
-                            download_speed = int(float(speed_str.replace('KB/s', '').strip()) * 1024)
-                        except:
+                            download_speed = int(float(p[:-4]) * 1024)
+                            break
+                        except ValueError:
                             pass
-                    elif 'MB/s' in speed_str:
+                    elif p.endswith('MB/s'):
                         try:
-                            download_speed = int(float(speed_str.replace('MB/s', '').strip()) * 1024 * 1024)
-                        except:
+                            download_speed = int(float(p[:-4]) * 1024 * 1024)
+                            break
+                        except ValueError:
                             pass
+                for p in parts[1:4]:
+                    digits = p.replace('ms', '').strip()
+                    if digits.isdigit():
+                        latency = int(digits)
+                        break
+                    if download_speed and latency:
+                        break
 
-            status = 'active' if download_speed and download_speed > 0 else 'inactive'
+            node_data = dict(proxy)  # clash 原字段即内部存储格式
+            node_data.pop('name', None)
+            results.append({
+                "node_type": ptype,
+                "node_data": node_data,
+                "node_name": name,
+                "download_speed": download_speed,
+                "latency": latency,
+                "country": country,
+            })
 
-            node_data = {
-                'name': name,
-                'type': ptype,
-                'server': proxy.get('server', ''),
-                'port': proxy.get('port', 0),
-                'cipher': proxy.get('cipher', ''),
-                'password': proxy.get('password', ''),
-                'uuid': proxy.get('uuid', ''),
-                'alterId': proxy.get('alterId', 0),
-                'udp': proxy.get('udp', False),
-            }
-
-            now = int(time.time())
-            with get_connection() as conn:
-                cursor = conn.execute(
-                    """INSERT INTO nodes (subscribe_url, source_id, node_name, node_type, node_data,
-                       status, country, download_speed, last_checked_at, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (source_url, source_id, name, ptype, json.dumps(node_data),
-                     status, country, download_speed, now, now, now)
-                )
-                _ = cursor.lastrowid
-
-            added += 1
-
-        logger.info(f"Stored {added} nodes with status info")
+        from ..schema.repository import apply_check_results
+        stats = apply_check_results(results)
+        logger.info(f"测速结果回填完成: 存活 {stats['alive']}，未命中转 inactive {stats['marked_inactive']}")
 
     async def get_api_status(self) -> Dict:
         """获取 subs-check API 状态"""

@@ -473,3 +473,217 @@ def _clash_type(node_type: str) -> str:
     if t == "snell": return "snell"
     if t == "wireguard": return "wireguard"
     return "ss"
+# ============ Surge / Loon / Quantumult X ============
+
+def generate_surge(nodes: List[Node]) -> str:
+    """Surge 配置（[Proxy] 段）。支持 ss/trojan/vmess(Surge5+)/http/socks5，其余跳过。"""
+    lines = ["#!PROFILES-OFFSET:0", "[Proxy]"]
+    count = 0
+    for n in nodes:
+        try:
+            nd = _nd(n)
+            name = (n.node_name or f"node_{n.id}").replace(",", " ").strip()
+            server, port = nd.get("server", ""), int(nd.get("port", 443))
+            t = n.node_type.lower()
+            sni = nd.get("sni") or nd.get("servername") or ""
+            if t == "ss":
+                lines.append(f"{name} = ss, {server}, {port}, encrypt-method={_cipher_of(nd)}, password={nd.get('password','')}, udp-relay=true")
+            elif t == "trojan":
+                extra = f", sni={sni}" if sni else ""
+                if nd.get("skip-cert-verify"): extra += ", skip-cert-verify=true"
+                ws = ""
+                if nd.get("network") == "ws":
+                    ws = ", ws=true"
+                    if nd.get("ws-path") or nd.get("path"): ws += f", ws-path={nd.get('ws-path') or nd.get('path')}"
+                    host = nd.get("servername") or nd.get("host")
+                    if host: ws += f", ws-headers=Host:{host}"
+                lines.append(f"{name} = trojan, {server}, {port}, password={nd.get('password','')}{extra}{ws}")
+            elif t == "vmess":
+                extra = []
+                if nd.get("tls"): extra.append("tls=true")
+                if sni: extra.append(f"sni={sni}")
+                if nd.get("network") == "ws":
+                    extra.append("ws=true")
+                    if nd.get("ws-path") or nd.get("path"): extra.append(f"ws-path={nd.get('ws-path') or nd.get('path')}")
+                    host = nd.get("servername") or nd.get("host") or nd.get("ws-host")
+                    if host: extra.append(f"ws-headers=Host:{host}")
+                es = ("," + ",".join(extra)) if extra else ""
+                lines.append(f"{name} = vmess, {server}, {port}, username={nd.get('uuid','')}{es}")
+            elif t == "http":
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                tl = ", tls=true" if nd.get("tls") else ""
+                lines.append(f"{name} = http, {server}, {port}{auth}{tl}")
+            elif t in ("socks5", "socks"):
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                lines.append(f"{name} = socks5, {server}, {port}{auth}, udp-relay=true")
+            else:
+                continue
+            count += 1
+        except Exception:
+            continue
+    if not count:
+        return "\n".join(lines + ["# (无兼容节点)"])
+    lines += ["", "[Proxy Group]", "Proxy = select, Auto, DIRECT, " + ", ".join(
+        _surge_escape(n.node_name) for n in nodes[:500] if n.node_name), "",
+        "[Rule]", "FINAL,Proxy"]
+    return "\n".join(lines)
+
+
+def _surge_escape(s: str) -> str:
+    return str(s).replace(",", " ").strip() or "node"
+
+
+def generate_loon(nodes: List[Node]) -> str:
+    """Loon 插件格式（[Proxy] 段）。支持 ss/trojan/vmess/vless/hysteria2/http/socks5。"""
+    lines = ["[Proxy]"]
+    count = 0
+    for n in nodes:
+        try:
+            nd = _nd(n)
+            name = (n.node_name or f"node_{n.id}").replace(",", " ").strip()
+            server, port = nd.get("server", ""), int(nd.get("port", 443))
+            t = n.node_type.lower()
+            sni = nd.get("sni") or nd.get("servername") or ""
+            if t == "ss":
+                lines.append(f"{name} = Shadowsocks, {server}, {port}, encrypt-method={_cipher_of(nd)}, password={nd.get('password','')}, udp=true")
+            elif t == "trojan":
+                extra = f", sni={sni}" if sni else ""
+                if nd.get("skip-cert-verify"): extra += ", skip-cert-verify=true"
+                lines.append(f"{name} = Trojan, {server}, {port}, password={nd.get('password','')}{extra}, udp=true")
+            elif t == "vmess":
+                extra = []
+                if nd.get("network") == "ws":
+                    extra.append("ws=true")
+                    if nd.get("ws-path") or nd.get("path"): extra.append(f"ws-path={nd.get('ws-path') or nd.get('path')}")
+                    host = nd.get("servername") or nd.get("host")
+                    if host: extra.append(f"ws-headers=Host:{host}")
+                if nd.get("tls"):
+                    extra.append("tls=true")
+                    if sni: extra.append(f"sni={sni}")
+                es = (", " + ", ".join(extra)) if extra else ""
+                lines.append(f"{name} = VMess, {server}, {port}, username={nd.get('uuid','')}{es}")
+            elif t == "vless":
+                extra = [f"uuid={nd.get('uuid','')}"]
+                if sni: extra.append(f"sni={sni}")
+                if nd.get("flow"): extra.append(f"flow={nd['flow']}")
+                if nd.get("network") == "ws":
+                    extra.append("transport=ws")
+                    if nd.get("ws-path") or nd.get("path"): extra.append(f"path={nd.get('ws-path') or nd.get('path')}")
+                es = (", " + ", ".join(extra)) if extra else ""
+                lines.append(f"{name} = VLESS, {server}, {port}{es}")
+            elif t in ("hysteria2", "hy2"):
+                extra = f", sni={sni}" if sni else ""
+                if nd.get("skip-cert-verify"): extra += ", skip-cert-verify=true"
+                lines.append(f"{name} = Hysteria2, {server}, {port}, password={nd.get('password','')}{extra}")
+            elif t == "http":
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                lines.append(f"{name} = HTTP, {server}, {port}{auth}")
+            elif t in ("socks5", "socks"):
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                lines.append(f"{name} = SOCKS5, {server}, {port}{auth}")
+            else:
+                continue
+            count += 1
+        except Exception:
+            continue
+    if not count:
+        lines.append("# (无兼容节点)")
+    return "\n".join(lines)
+
+
+def generate_qx(nodes: List[Node]) -> str:
+    """Quantumult X 格式（filter/proxy 行）。支持 ss/trojan/vmess/http/socks5。"""
+    lines = ["# Quantumult X 节点列表：粘贴到 [server_local] 段"]
+    count = 0
+    for n in nodes:
+        try:
+            nd = _nd(n)
+            name = (n.node_name or f"node_{n.id}").replace(",", " ").strip()
+            server, port = nd.get("server", ""), int(nd.get("port", 443))
+            t = n.node_type.lower()
+            sni = nd.get("sni") or nd.get("servername") or ""
+            if t == "ss":
+                lines.append(f"{name} = ss, {server}, {port}, encrypt-method={_cipher_of(nd)}, password={nd.get('password','')}, udp-relay=true")
+            elif t == "trojan":
+                extra = []
+                if sni: extra.append(f"sni={sni}")
+                if nd.get("skip-cert-verify"): extra.append("tls-verification=false")
+                es = (", " + ", ".join(extra)) if extra else ""
+                lines.append(f"{name} = trojan, {server}, {port}, password={nd.get('password','')}{es}, over-tls=true")
+            elif t == "vmess":
+                opts = []
+                if nd.get("network") == "ws":
+                    opts.append("network=ws")
+                    if nd.get("ws-path") or nd.get("path"): opts.append(f"ws-path={nd.get('ws-path') or nd.get('path')}")
+                    host = nd.get("servername") or nd.get("host")
+                    if host: opts.append(f"ws-headers=Host:{host}")
+                if nd.get("tls"):
+                    opts.append("over-tls=true")
+                    if sni: opts.append(f"tls-host={sni}")
+                os_ = (', "' + '", "'.join(opts) + '"') if opts else ""
+                lines.append(f"{name} = vmess, {server}, {port}, {nd.get('uuid','')}{os_}")
+            elif t in ("http",):
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                prefix = "https" if nd.get("tls") else "http"
+                lines.append(f"{name} = {prefix}, {server}, {port}{auth}")
+            elif t in ("socks5", "socks"):
+                user, pwd = nd.get("username", ""), nd.get("password", "")
+                auth = f", {user}, {pwd}" if user else ""
+                lines.append(f"{name} = socks5, {server}, {port}{auth}, over-tls=false")
+            else:
+                continue
+            count += 1
+        except Exception:
+            continue
+    if not count:
+        lines.append("# (无兼容节点)")
+    return "\n".join(lines)
+
+
+def generate_mixed(nodes: List[Node]) -> str:
+    return generate_txt(nodes)
+
+
+def generate_clash_meta(nodes: List[Node]) -> str:
+    """Clash.Meta 兼容（与 clash 同构；Meta 内核字段超集）"""
+    return generate_clash(nodes)
+
+
+FORMAT_GENERATORS = {
+    "clash": generate_clash,
+    "clash-meta": generate_clash_meta,
+    "singbox": generate_singbox,
+    "v2ray": generate_v2ray,
+    "base64": generate_base64,
+    "txt": generate_txt,
+    "mixed": generate_mixed,
+    "surge": generate_surge,
+    "loon": generate_loon,
+    "qx": generate_qx,
+}
+
+
+def generate_by_format(fmt: str, nodes: List[Node]) -> str:
+    gen = FORMAT_GENERATORS.get(fmt)
+    if not gen:
+        raise ValueError(f"未知导出格式: {fmt}")
+    return gen(nodes)
+
+
+EXPORT_CONTENT_TYPES = {
+    "clash": "text/yaml; charset=utf-8",
+    "clash-meta": "text/yaml; charset=utf-8",
+    "singbox": "application/json; charset=utf-8",
+    "v2ray": "text/plain; charset=utf-8",
+    "base64": "text/plain; charset=utf-8",
+    "txt": "text/plain; charset=utf-8",
+    "mixed": "text/plain; charset=utf-8",
+    "surge": "text/plain; charset=utf-8",
+    "loon": "text/plain; charset=utf-8",
+    "qx": "text/plain; charset=utf-8",
+}
