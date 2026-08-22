@@ -5,7 +5,7 @@
 **方案版本**: v2.1 + 导入架构重构（2026-08-22 本轮，commit 78eb9f7）
 **域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，HTTPS 200 ✅）
 **服务**: http://127.0.0.1:8899（节点池 7378：593 active / 6785 unknown，CF优选端点 3803）
-**GitHub**: https://github.com/lizhenghost/sanl（本地最新=订阅转换功能待推：旧 PAT 已撤销；产品定位=两大块：节点池聚合 + 订阅转换）
+**GitHub**: https://github.com/lizhenghost/sanl（main=bd3694c 已推：白蓝UI+订阅转换+测速进度；PAT nodepool-push 仍有效）
 
 ## 2026-08-22 第二轮：导入架构重构（78eb9f7）
 ### 根因诊断
