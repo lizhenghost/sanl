@@ -1,8 +1,13 @@
 # sanl (NodePool) 项目进度报告
 
-**更新时间**: 2026-08-22 UTC
+**更新时间**: 2026-08-22 UTC（第三轮：前端信息架构 v2）
 **项目名**: sanl
-**方案版本**: v2.1 + 导入架构重构（2026-08-22 本轮，commit 78eb9f7）
+**方案版本**: **v2.2.1**（commit b4d1bdd，已推 GitHub + tag，CI/Release 全绿）
+
+### 🚀 运行态快照
+- 进程: python3 main.py @ 127.0.0.1:8899；节点 7766 / CF优选端点 20880+11
+- 前端信息架构 v2（b4d1bdd）：📊总览(仪表盘) ｜ 🧩节点池(节点列表/世界地图/**节点源**/订阅输出/令牌管理/测速任务) ｜ 🛰CF优选(**优选端点独立页**←原节点源Tab迁出 / 网段扫描) ｜ 🔁转换工具(订阅转换)
+- 版本链路: config/app.yaml → GET /api/version → logo 动态显示（修掉 config.py 路径多一级 '..' 的隐藏bug，app.yaml 此前从未被读取）
 **域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，HTTPS 200 ✅）
 **服务**: http://127.0.0.1:8899（节点池 7378：593 active / 6785 unknown，CF优选端点 3803）
 **GitHub**: https://github.com/lizhenghost/sanl（main=bd3694c 已推：白蓝UI+订阅转换+测速进度；PAT nodepool-push 仍有效）
