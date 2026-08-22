@@ -30,6 +30,50 @@ python main.py
 
 访问 `http://localhost:8899` 查看仪表盘。
 
+## Docker 部署（推荐）
+
+```bash
+# 一键构建 + 启动（含健康检查、数据持久化、日志轮转）
+docker compose up -d --build
+
+# 查看健康状态
+docker compose ps
+
+# 更新版本
+git pull && docker compose up -d --build
+```
+
+数据全部落在宿主机 `./data`、`./output`、`./config`，删容器不丢数据。
+如需 HTTPS：取消 docker-compose.yml 中 caddy 注释段，创建 `deploy/Caddyfile`：
+
+    your-domain.com {
+        reverse_proxy nodepool:8899
+    }
+
+## v2.3 新功能
+
+| 功能 | 说明 |
+|------|------|
+| ⭐ 节点收藏 | 列表点击星标；收藏节点在所有订阅输出中置顶 |
+| 📈 健康历史曲线 | 每轮测速自动快照，列表点趋势图标看单节点近 7 天延迟/速度双轴趋势 |
+| 📊 订阅分发统计 | Token 维度记录访问次数/今日次数/累计流量/最近 UA，令牌页顶部展示 |
+| 🌍 GeoIP 自动刷新 | 每 12h 定时 + 每轮测速完成后自动触发，无需手动 |
+| ⬇️ CSV/JSON 导出 | 节点列表一键导出当前筛选结果 |
+| 🙈 表格列显隐 | 自定义隐藏国家/延迟/速度/评分/等级/状态列（记忆偏好） |
+| 📱 移动端底部 Tab | ≤768px 自动切换为底部五宫格导航，侧边栏收起 |
+| 🌙 暗/亮主题 | 右上角一键切换，跟随记忆，图表配色自适应 |
+| 🔤 中英双语 | 框架层 i18n，EN 按钮即时切换导航与页面 |
+| ⚡ SQLite WAL | 读写并发提升，busy_timeout 防写锁报错 |
+| 🐘 PG 迁移工具 | 节点破 5 万时用 scripts/migrate_to_pg.py 平滑迁 PostgreSQL |
+
+### PostgreSQL 迁移（可选，节点数 >5 万时）
+
+    python3 scripts/migrate_to_pg.py export --sqlite data/nodes.db --out /tmp/export.json
+    pip install psycopg2-binary
+    python3 scripts/migrate_to_pg.py import --pg "postgresql://user:pass@host:5432/nodepool" --dump /tmp/export.json
+
+> 注意：SQLite 数据库请放在本地磁盘或 Docker 卷；NFS 网络文件系统上存在缓存一致性风险。
+
 ## 目录结构
 
 ```

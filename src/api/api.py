@@ -11,7 +11,7 @@ from fastapi.routing import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 
-from ..config import get_app_config
+from ..config import get_app_config, get_scheduler_config
 from ..schema import repository, models
 from ..scheduler.scheduler import Scheduler
 
@@ -444,10 +444,58 @@ async def get_subscribe(
 
 # ===== 排名接口 =====
 
+
+@sub_router.get("/internal/manual", include_in_schema=False)
+async def subscribe_internal_manual():
+    """内部端点：手动导入节点聚合订阅（供 subs-check 每轮测速使用，不对外）"""
+    from .subscribe import generate_by_format
+    nodes = repository.list_nodes(
+        limit=10000, sort="score", order="desc", source_type="manual"
+    )
+    if not nodes:
+        return Response(content="", media_type="text/plain; charset=utf-8")
+    content = generate_by_format("base64", nodes)
+    return Response(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache"}
+    )
+
+
+@api_router.get("/settings/check-threshold")
+async def get_check_threshold():
+    """获取节点合格延迟阈值（ms）"""
+    return {"status": "ok", "qualified_latency_ms": get_scheduler_config().get("qualified_latency_ms", 200)}
+
+
+@api_router.post("/settings/check-threshold")
+async def set_check_threshold(value: int = Query(..., ge=50, le=5000, description="合格延迟 ms")):
+    """设置节点合格延迟阈值：测速后超过阈值的存活节点标记为 inactive（不出现在默认订阅）"""
+    import yaml as _yaml
+    path = os.path.join("config", "app.yaml")
+    try:
+        with open(path) as f:
+            cfg = _yaml.safe_load(f) or {}
+        cfg.setdefault("scheduler", {})["qualified_latency_ms"] = value
+        with open(path, "w") as f:
+            _yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存配置失败: {e}")
+    return {"status": "ok", "qualified_latency_ms": value}
+
+
+@api_router.post("/admin/apply-qualified-latency")
+async def apply_qualified_latency():
+    """按当前阈值立即重判现有 active 节点（无需等下轮测速）"""
+    threshold = get_scheduler_config().get("qualified_latency_ms", 200)
+    changed = repository.apply_qualified_latency(threshold)
+    return {"status": "ok", "threshold_ms": threshold, "marked_inactive": changed}
+
 # ===== 订阅短链路由 /sub/{token}/{format}（方案核心 API 设计）=====
 
 @sub_router.get("/{token}/{fmt}")
 async def subscribe_by_token(
+    request: Request,
     token: str,
     fmt: str,
     limit: int = Query(5000, le=20000),
@@ -490,11 +538,41 @@ async def subscribe_by_token(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # 访问统计（token 维度，附录：优化 #3）——失败不影响输出
+    try:
+        repository.log_sub_access(info.get("id"), f"/sub/{token[:8]}.../{fmt}",
+                                  request.headers.get("user-agent", ""), len(content.encode()), len(nodes))
+    except Exception:
+        pass
+
     return Response(
         content=content,
         media_type=EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
         headers={"Cache-Control": "no-cache", "profile-update-interval": "6"}
     )
+
+
+@api_router.post("/nodes/{node_id}/favorite")
+async def toggle_node_favorite(node_id: int):
+    """切换节点收藏（星标）；收藏节点在订阅输出中置顶"""
+    try:
+        fav = repository.toggle_favorite(node_id)
+        return {"status": "ok", "id": node_id, "favorite": fav}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+
+@api_router.get("/nodes/{node_id}/history")
+async def get_node_history(node_id: int, days: int = Query(7, ge=1, le=30)):
+    """单节点近 N 天健康趋势（延迟/速度/存活）"""
+    return {"status": "ok", "node_id": node_id, "days": days,
+            "points": repository.node_health_trend(node_id, days)}
+
+
+@api_router.get("/tokens/stats")
+async def get_token_stats():
+    """订阅分发统计：按 token 汇总访问次数/流量/最近UA"""
+    return {"status": "ok", "items": repository.token_access_stats()}
 
 
 @api_router.get("/ranking")

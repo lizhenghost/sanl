@@ -26,6 +26,36 @@ def _migrate(conn):
     add_column("sources", "category", "TEXT DEFAULT 'free'")
     add_column("nodes", "fingerprint", "TEXT")
     add_column("nodes", "last_seen_at", "INTEGER")
+    add_column("nodes", "favorite", "INTEGER NOT NULL DEFAULT 0")
+
+    # 节点健康历史（近 N 天延迟/存活趋势，附录：优化 #4）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS node_health_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id INTEGER NOT NULL,
+            checked_at INTEGER NOT NULL,
+            latency INTEGER,
+            download_speed INTEGER,
+            status TEXT,
+            score REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_nhh_node ON node_health_history(node_id, checked_at)")
+
+    # 订阅访问日志（token 维度流量统计，附录：优化 #3）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sub_access_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_id INTEGER,
+            ts INTEGER NOT NULL,
+            path TEXT,
+            ua TEXT,
+            bytes_out INTEGER DEFAULT 0,
+            node_count INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sal_ts ON sub_access_log(ts)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sal_token ON sub_access_log(token_id)")
 
     # 回填历史行的节点指纹（NULL 指纹会让 NOT IN 失效、造成重复插入）
     null_rows = conn.execute(
@@ -370,9 +400,15 @@ def init_db():
 @contextmanager
 def get_connection():
     """获取数据库连接（上下文管理器）"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
     try:
+        # 并发优化（附录：优化 #8 SQLite 侧）：busy_timeout 防写锁报错；WAL 提升读写并发（NFS 等不支持时静默降级）
+        conn.execute("PRAGMA busy_timeout = 15000")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except Exception:
+            pass
         yield conn
         conn.commit()
     except Exception as e:
@@ -904,7 +940,7 @@ def get_ranking(limit: int = 50, country: Optional[str] = None,
             else:
                 query += " AND s.source_type = ?"
                 params.append(source_type)
-        query += " ORDER BY n.score DESC, n.download_speed DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY n.favorite DESC, n.score DESC, n.download_speed DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         rows = conn.execute(query, params).fetchall()
@@ -927,3 +963,95 @@ def get_ranking_stats() -> dict:
             "avg_score": round(avg or 0, 1),
             "top_score": round(top or 0, 1)
         }
+
+# ===== 收藏夹 / 健康历史 / 访问统计（v2.3 优化）=====
+
+def count_nodes_by_source_type(source_type: str) -> int:
+    """统计某来源类型的节点数"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE source_id IN (SELECT id FROM sources WHERE source_type = ?)",
+            (source_type,)).fetchone()
+        return row[0] if row else 0
+
+
+def apply_qualified_latency(threshold_ms: int) -> int:
+    """合格延迟判定：超过阈值的存活节点标记 inactive（订阅默认输出 active）"""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE nodes SET status = 'inactive', updated_at = strftime('%s','now') "
+            "WHERE status = 'active' AND latency IS NOT NULL AND latency > ?",
+            (threshold_ms,))
+        return cur.rowcount
+
+
+def toggle_favorite(node_id: int) -> bool:
+    """切换节点收藏状态，返回切换后的状态"""
+    with get_connection() as conn:
+        row = conn.execute("SELECT favorite FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise ValueError(f"node {node_id} not found")
+        new_val = 0 if row["favorite"] else 1
+        conn.execute("UPDATE nodes SET favorite = ?, updated_at = strftime('%s','now') WHERE id = ?",
+                     (new_val, node_id))
+        return bool(new_val)
+
+
+def record_health_snapshot(since_ts: int) -> int:
+    """测速完成后，把本轮更新的节点写入历史表（since_ts=任务启动时间戳）"""
+    import time as _t
+    now = int(_t.time())
+    with get_connection() as conn:
+        cur = conn.execute("""
+            INSERT INTO node_health_history (node_id, checked_at, latency, download_speed, status, score)
+            SELECT id, last_checked_at, latency, download_speed, status, score
+            FROM nodes WHERE last_checked_at IS NOT NULL AND last_checked_at >= ?
+        """, (since_ts,))
+        return cur.rowcount
+
+
+def node_health_trend(node_id: int, days: int = 7) -> list:
+    """单节点近 N 天健康趋势"""
+    cutoff = int(__import__('time').time()) - days * 86400
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT checked_at, latency, download_speed, status FROM node_health_history "
+            "WHERE node_id = ? AND checked_at >= ? ORDER BY checked_at ASC LIMIT 500",
+            (node_id, cutoff)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def log_sub_access(token_id, path: str, ua: str, bytes_out: int, node_count: int):
+    """记录一次订阅访问"""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO sub_access_log (token_id, ts, path, ua, bytes_out, node_count) VALUES (?,?,?,?,?,?)",
+            (token_id, int(__import__('time').time()), path[:200], (ua or "")[:200], bytes_out, node_count))
+
+
+def token_access_stats(limit: int = 50) -> list:
+    """按 token 汇总访问统计（总次数/今日次数/累计流量/最近访问）"""
+    today0 = int(__import__('datetime').datetime.combine(
+        __import__('datetime').date.today(), __import__('datetime').time.min).timestamp())
+    with get_connection() as conn:
+        rows = conn.execute("""
+            SELECT t.id AS token_id, COALESCE(t.name, t.token) AS label,
+                   COUNT(l.id) AS total_hits,
+                   SUM(CASE WHEN l.ts >= ? THEN 1 ELSE 0 END) AS today_hits,
+                   COALESCE(SUM(l.bytes_out),0) AS total_bytes,
+                   MAX(l.ts) AS last_seen,
+                   (SELECT ua FROM sub_access_log WHERE token_id = t.id AND ua != '' ORDER BY ts DESC LIMIT 1) AS last_ua,
+                   COALESCE(AVG(l.node_count),0) AS avg_nodes
+            FROM tokens t LEFT JOIN sub_access_log l ON l.token_id = t.id
+            GROUP BY t.id ORDER BY total_hits DESC, t.created_at DESC LIMIT ?
+        """, (today0, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clean_old_stats(history_days: int = 7, access_days: int = 30):
+    """清理过期统计数据"""
+    now = int(__import__('time').time())
+    with get_connection() as conn:
+        h = conn.execute("DELETE FROM node_health_history WHERE checked_at < ?", (now - history_days*86400,)).rowcount
+        a = conn.execute("DELETE FROM sub_access_log WHERE ts < ?", (now - access_days*86400,)).rowcount
+        return {"history_deleted": h, "access_deleted": a}

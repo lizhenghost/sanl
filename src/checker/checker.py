@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from ..config import get_subs_check_config
+from ..config import get_subs_check_config, get_app_config, get_scheduler_config, get_app_config
 from ..schema import repository
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,8 @@ class Checker:
 
             await self._update_subs_check_config(sources)
 
+            import time as _t
+            job_start_ts = int(_t.time())
             logger.info(f"Starting subs-check with {len(sources)} sources ({trigger})")
             result = await self._run_subs_check()
 
@@ -184,6 +186,19 @@ class Checker:
                 logger.info(f"Updated scores for {scored} nodes")
                 repository.update_check_job(job_id.id, "completed", result=json.dumps(result))
                 job.update({"status": "completed", "finished_at": time.time()})
+                # 健康历史快照（近 7 天趋势数据源，附录：优化 #4）
+                try:
+                    snap = repository.record_health_snapshot(job_start_ts)
+                    logger.info(f"Health history snapshot: {snap} records")
+                except Exception as he:
+                    logger.warning(f"health snapshot failed: {he}")
+                # 合格延迟判定：超过阈值的存活节点标记 inactive（默认订阅不输出）
+                try:
+                    threshold = get_scheduler_config().get("qualified_latency_ms", 200)
+                    marked = repository.apply_qualified_latency(int(threshold))
+                    logger.info(f"Qualified-latency check (>{threshold}ms): {marked} nodes marked inactive")
+                except Exception as qe:
+                    logger.warning(f"apply qualified latency failed: {qe}")
                 # 测速后异步刷新 GeoIP 出口识别（不阻塞返回）
                 import asyncio
                 from ..geoip import refresh_node_geo
@@ -209,7 +224,7 @@ class Checker:
             config = yaml.safe_load(f) or {}
 
         # subs-check 只吃真实代理订阅：
-        # - manual:// 手动导入源不支持
+        # - manual:// 手动导入节点 → 通过本机内部端点 /sub/internal/manual 聚合输出，同样参与测速
         # - data:/static 与 cf-list 类型是 CF 优选 host:port 列表，不是代理节点，喂进去只会浪费时间
         remote_urls = [
             src.url for src in sources
@@ -217,6 +232,14 @@ class Checker:
             and not src.url.startswith('data:')
             and (getattr(src, 'source_type', '') or '').lower() not in ('cf-list', 'static')
         ]
+        try:
+            manual_count = repository.count_nodes_by_source_type('manual')
+        except Exception:
+            manual_count = 0
+        if manual_count > 0:
+            local_port = get_app_config().get('port', 8899)
+            remote_urls.append(f"http://127.0.0.1:{local_port}/sub/internal/manual")
+            logger.info(f"Including {manual_count} manual nodes via internal endpoint")
         config['sub-urls'] = remote_urls
 
         with open(self.config_path, 'w') as f:

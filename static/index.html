@@ -14,6 +14,16 @@
             --success: #16a34a; --warning: #d97706; --danger: #dc2626;
             --shadow: 0 1px 3px rgba(30,64,175,.08), 0 4px 16px rgba(30,64,175,.07);
             --shadow-lg: 0 4px 8px rgba(30,64,175,.10), 0 12px 32px rgba(30,64,175,.12);
+            --hover: #eff6ff; --code-bg: #f1f5f9;
+        }
+        [data-theme="dark"] {
+            --bg: #0b1220; --surface: #151f31; --surface-2: #1c2a40;
+            --border: #2a3a55; --text: #e2e8f0; --text-muted: #8fa3bd;
+            --primary: #60a5fa; --primary-hover: #93c5fd; --accent: #38bdf8;
+            --success: #34d399; --warning: #fbbf24; --danger: #f87171;
+            --shadow: 0 1px 3px rgba(0,0,0,.35), 0 4px 16px rgba(0,0,0,.3);
+            --shadow-lg: 0 4px 8px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
+            --hover: #1e2d47; --code-bg: #0f1a2c;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: auto; }
@@ -23,7 +33,7 @@
         .logo { font-size: 24px; font-weight: bold; color: var(--primary); margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
         .logo span { color: var(--text-muted); font-size: 14px; font-weight: normal; }
         .nav-item { padding: 12px 16px; border-radius: 10px; cursor: pointer; transition: all .2s ease; margin-bottom: 4px; display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-weight: 500; }
-        .nav-item:hover { background: #eff6ff; color: var(--primary); }
+        .nav-item:hover { background: var(--hover); color: var(--primary); }
         .nav-item.active { background: linear-gradient(135deg, var(--primary), var(--accent)); color: #fff; box-shadow: 0 4px 12px rgba(37,99,235,.30); }
         .sidebar-footer { margin-top: auto; padding-top: 20px; color: #94a3b8; font-size: 12px; }
         .nav-group { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .8px; padding: 14px 16px 6px; font-weight: 700; }
@@ -39,7 +49,7 @@
         th, td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
         th { background: var(--surface-2); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .4px; white-space: nowrap; }
         tbody tr { transition: background .15s ease; }
-        tbody tr:hover { background: #eff6ff; }
+        tbody tr:hover { background: var(--hover); }
         tbody tr:last-child td { border-bottom: none; }
         .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; display: inline-block; }
         .badge-success { background: #dcfce7; color: var(--success); }
@@ -53,8 +63,8 @@
         .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
         .btn-primary { background: linear-gradient(135deg, var(--primary), var(--accent)); color: #fff; box-shadow: 0 2px 8px rgba(37,99,235,.25); }
         .btn-primary:hover { box-shadow: 0 4px 16px rgba(37,99,235,.40); }
-        .btn-secondary { background: var(--surface); color: var(--primary); border-color: #bfdbfe; }
-        .btn-secondary:hover { background: #eff6ff; border-color: var(--primary); }
+        .btn-secondary { background: var(--surface); color: var(--primary); border-color: var(--border); }
+        .btn-secondary:hover { background: var(--hover); border-color: var(--primary); }
         .btn-danger { background: #fee2e2; color: var(--danger); }
         .btn-danger:hover { background: #fecaca; }
         .btn-sm { padding: 6px 12px; font-size: 12px; }
@@ -91,7 +101,7 @@
         .mt-4 { margin-top: 16px; }
         .mb-4 { margin-bottom: 16px; }
         .text-muted { color: var(--text-muted); }
-        code { background: #eff6ff; color: var(--primary); padding: 2px 8px; border-radius: 6px; font-size: 13px; }
+        code { background: var(--hover); color: var(--primary); padding: 2px 8px; border-radius: 6px; font-size: 13px; }
         .token-display { background: var(--surface-2); border: 1px solid var(--border); padding: 12px; border-radius: 10px; font-family: monospace; font-size: 13px; word-break: break-all; user-select: all; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -101,6 +111,7 @@
         .preset-card.disabled { opacity: 0.5; cursor: not-allowed; }
         .preset-name { font-weight: 600; margin-bottom: 4px; }
         .preset-url { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #bottom-tab { display: none; }
         @media (max-width: 768px) {
             .container { flex-direction: column; }
             .sidebar { width: 100%; height: auto; position: static; padding: 10px 12px; display: flex; align-items: center; gap: 8px; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
@@ -110,7 +121,13 @@
             .nav-item { white-space: nowrap; font-size: 13px; padding: 8px 10px; }
             .sidebar-footer { display: none; }
             .nav-group { display: none; }
-            .main { padding: 12px; }
+            .sidebar { display: none; }
+            #bottom-tab { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
+                background: var(--surface); border-top: 1px solid var(--border); padding: 6px 2px calc(6px + env(safe-area-inset-bottom)); }
+            #bottom-tab > div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+                font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 4px 0; border-radius: 8px; }
+            #bottom-tab > div.active { color: var(--primary); font-weight: 600; }
+            .main { padding: 12px 12px 76px; }
             .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
             .stat-card { padding: 16px; }
             .stat-value { font-size: 26px; }
@@ -131,7 +148,10 @@
 <body>
     <div class="container">
         <aside class="sidebar">
-            <div class="logo">🌐 NodePool <span id="app-version">v2.2.0</span></div>
+            <div class="logo" style="justify-content:space-between;">🌐 NodePool <span style="display:flex;gap:6px;align-items:center;">
+                <button class="btn btn-sm btn-secondary" id="lang-btn" onclick="toggleLang()" title="Language" style="padding:4px 8px;font-size:12px;">EN</button>
+                <button class="btn btn-sm btn-secondary" id="theme-btn" onclick="toggleTheme()" title="主题" style="padding:4px 8px;font-size:13px;">🌙</button>
+              </span></div>
             <nav>
                 <div class="nav-group">📊 总览</div>
                 <div class="nav-item active" data-page="dashboard">📊 仪表盘</div>
@@ -185,6 +205,13 @@
             });
         });
 
+
+        function goPage(page) {
+            currentPage = page;
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.page === page));
+            document.querySelectorAll('#bottom-tab > div').forEach(d => d.classList.toggle('active', d.dataset.page === page));
+            renderPage(page);
+        }
         function renderPage(page) {
             const main = document.getElementById('main-content');
             switch(page) {
@@ -329,11 +356,22 @@
                             <option value="desc">降序</option>
                         </select>
                         <input class="form-input" style="width:200px;" id="nf-search" placeholder="搜索..." oninput="filterNodes()">
+                        <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:4px;">
+                            <input type="checkbox" id="nf-export-latency" checked> 延迟
+                        </label>
+                        <button class="btn btn-secondary" onclick="exportNodes('csv')">CSV</button>
+                        <button class="btn btn-secondary" onclick="exportNodes('json')">JSON</button>
+                        <select class="form-input" id="nf-cols" onchange="saveColVis()" multiple title="列显隐" style="height:42px;width:110px;">
+                            <option value="country">国家列</option>
+                            <option value="latency">延迟列</option>
+                            <option value="speed">速度列</option>
+                            <option value="score">评分列</option>
+                            <option value="grade">等级列</option>
+                            <option value="status">状态列</option>
+                        </select>
                     </div>
                 </div>
-                <div class="table-container"><table><thead><tr>
-                    <th>名称</th><th>协议</th><th>国家</th><th>延迟</th><th>速度</th><th>评分</th><th>等级</th><th>状态</th>
-                </tr></thead><tbody id="nodes-tbody"></tbody></table></div>
+                <div class="table-container"><table><thead><tr id="nodes-thead-row"></tr></thead><tbody id="nodes-tbody"></tbody></table></div>
                 <div class="flex-center flex mt-4" id="nodes-pagination"></div>
             `;
             loadNodes();
@@ -347,7 +385,7 @@
             const sort = document.getElementById('nf-sort') ? document.getElementById('nf-sort').value : 'latency';
             const order = document.getElementById('nf-order') ? document.getElementById('nf-order').value : 'asc';
             const src = document.getElementById('nf-src') ? document.getElementById('nf-src').value : '';
-            let url = `${API}/nodes?limit=200&sort=${sort}&order=${order}`;
+            let url = `${API}/nodes?limit=200&sort=${sort}&order=${order}&_t=${Date.now()}`;
             if (status) url += `&status=${status}`;
             if (type) url += `&node_type=${type}`;
             if (src) url += `&source_type=${src}`;
@@ -382,23 +420,110 @@
             pag.innerHTML = html;
         }
 
+        let colVis = JSON.parse(localStorage.getItem('np_colvis') || '[]');
+        function saveColVis() {
+            const sel = document.getElementById('nf-cols');
+            colVis = Array.from(sel.selectedOptions).map(o => o.value);
+            localStorage.setItem('np_colvis', JSON.stringify(colVis));
+            renderNodePage();
+        }
+        function starIcon(n) { return n.favorite ? '\u2B50' : '\u2606'; }
+
+        async function toggleFavorite(id) {
+            try {
+                const r = await (await fetch(`${API}/nodes/${id}/favorite`, { method:'POST' })).json();
+                if (r.status === 'ok') { showToast(r.favorite ? '\u2B50 已收藏，订阅输出置顶' : '已取消收藏'); loadNodes(); }
+            } catch(e) { showToast('操作失败','error'); }
+        }
+
+        async function showTrend(nodeId, name) {
+            try {
+                const d = await (await fetch(`${API}/nodes/${nodeId}/history?days=7`)).json();
+                const pts = d.points || [];
+                const modal = document.createElement('div');
+                modal.className = 'modal'; modal.style.display='flex';
+                modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+                const times = pts.map(p => new Date((p.checked_at||0)*1000).toLocaleString());
+                const lat = pts.map(p => p.latency);
+                const spd = pts.map(p => p.download_speed ? +(p.download_speed/1048576).toFixed(2) : null);
+                modal.innerHTML = `<div class="modal-content" style="max-width:760px;">
+                    <h3 style="margin-bottom:14px;">\uD83D\uDCC8 近7天健康趋势 — ${(name||nodeId).toString().slice(0,40)}</h3>
+                    ${pts.length ? '<div id="trend-chart" style="width:100%;height:320px;"></div>'
+                      : '<p class="text-muted">该节点还没有测速历史（等下一轮测速后生成）</p>'}
+                    <div class="flex" style="justify-content:flex-end;margin-top:16px;">
+                        <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button></div></div>`;
+                document.body.appendChild(modal);
+                if (pts.length && window.echarts) {
+                    const ch = echarts.init(document.getElementById('trend-chart'));
+                    ch.setOption({ tooltip:{trigger:'axis'}, legend:{data:['延迟(ms)','速度(MB/s)']},
+                        grid:{left:50,right:20,top:36,bottom:56},
+                        xAxis:{type:'category', data:times},
+                        yAxis:[{type:'value',name:'ms'},{type:'value',name:'MB/s'}],
+                        series:[
+                            {name:'延迟(ms)', type:'line', data:lat, smooth:true,
+                             lineStyle:{color:'#2563eb'}, itemStyle:{color:'#2563eb'}},
+                            {name:'速度(MB/s)', type:'line', yAxisIndex:1, data:spd, smooth:true,
+                             lineStyle:{color:'#16a34a'}, itemStyle:{color:'#16a34a'}}
+                        ]});
+                }
+            } catch(e) { showToast('加载趋势失败','error'); }
+        }
+
+        // ===== CSV / JSON 导出（优化 #5a）=====
+        function exportNodes(fmt) {
+            const rows = allNodes || [];
+            if (!rows.length) { showToast('没有可导出的节点','error'); return; }
+            const lc = document.getElementById('nf-export-latency');
+            const withLat = !(lc && !lc.checked);
+            let blob, fname;
+            if (fmt === 'csv') {
+                const head = ['name','type','country'].concat(withLat?['latency_ms']:[]).concat(['speed_Bps','score','status']);
+                const esc = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+                const lines = [head.join(',')].concat(rows.map(n => [n.node_name,n.node_type,n.country].concat(withLat?[n.latency]:[]).concat([n.download_speed,(n.score||0).toFixed(1),n.status]).map(esc).join(',')));
+                blob = new Blob(['\ufeff'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
+                fname = `nodes_${Date.now()}.csv`;
+            } else {
+                const mapper = n => Object.assign({name:n.node_name,type:n.node_type,country:n.country}, withLat?{latency:n.latency}:{}, {speed:n.download_speed,score:n.score,status:n.status});
+                blob = new Blob([JSON.stringify(rows.map(mapper), null, 2)], {type:'application/json'});
+                fname = `nodes_${Date.now()}.json`;
+            }
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = fname; a.click();
+            URL.revokeObjectURL(a.href);
+            showToast(`✅ 已导出 ${rows.length} 个节点 (${fmt.toUpperCase()})`);
+        }
+
         function renderNodeTable(nodes) {
             const tbody = document.getElementById('nodes-tbody');
-            if (!tbody) return;  // 页面已切换，放弃渲染
-            if (!nodes.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>'; return; }
+            const thead = document.getElementById('nodes-thead-row');
+            if (!tbody) return;
+            const cols = [
+                ['star','',''], ['name','名称'], ['type','协议'], ['country','国家'],
+                ['latency','延迟'], ['speed','速度'], ['score','评分'], ['grade','等级'], ['status','状态'],
+                ['trend','📈','']
+            ].filter(c => !colVis.includes(c[0]));
+            if (thead) thead.innerHTML = cols.map(c => `<th>${c[1]}</th>`).join('');
+            if (!nodes.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>`; return; }
             tbody.innerHTML = nodes.map(n => {
                 const speed = n.download_speed ? (n.download_speed >= 1048576 ? (n.download_speed/1048576).toFixed(1)+'MB/s' : Math.round(n.download_speed/1024)+'KB/s') : '-';
                 const score = n.score || 0;
-                const scoreColor = score >= 50 ? '#22c55e' : score >= 20 ? '#f59e0b' : '#64748b';
+                const scoreColor = score >= 50 ? '#22c55e' : score >= 20 ? '#f59e0b' : '#94a3b8';
                 const statusClass = n.status === 'active' ? 'badge-success' : n.status === 'inactive' ? 'badge-danger' : 'badge-warning';
                 const grade = n.grade ? `<span class="badge ${score>=70?'badge-success':score>=50?'badge-warning':'badge-danger'}">${n.emoji||''} ${n.grade}</span>` : '-';
-                return `<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${n.node_name||'-'}</td>
-                    <td><span class="badge badge-info">${(n.node_type||'').toUpperCase()}</span></td>
-                    <td>${n.country||'🌐'}</td>
-                    <td>${n.latency ? n.latency+'ms' : '-'}</td><td>${speed}</td>
-                    <td style="color:${scoreColor};">${score.toFixed(1)}</td>
-                    <td>${grade}</td>
-                    <td><span class="badge ${statusClass}">${n.status}</span></td></tr>`;
+                const safeName = String(n.node_name||'').replace(/'/g,'').slice(0,40);
+                const cells = {
+                    star: `<td style="cursor:pointer;font-size:16px;" onclick="toggleFavorite(${n.id})" title="收藏（订阅置顶）">${starIcon(n)}</td>`,
+                    name: `<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${n.node_name||'-'}</td>`,
+                    type: `<td><span class="badge badge-info">${(n.node_type||'').toUpperCase()}</span></td>`,
+                    country: `<td>${n.country||'🌐'}</td>`,
+                    latency: `<td>${n.latency ? n.latency+'ms' : '-'}</td>`,
+                    speed: `<td>${speed}</td>`,
+                    score: `<td style="color:${scoreColor};">${score.toFixed(1)}</td>`,
+                    grade: `<td>${grade}</td>`,
+                    status: `<td><span class="badge ${statusClass}">${n.status}</span></td>`,
+                    trend: `<td style="cursor:pointer;" onclick="showTrend(${n.id},'${safeName}')" title="近7天趋势">📈</td>`
+                };
+                return '<tr>' + cols.map(c => cells[c[0]]).join('') + '</tr>';
             }).join('');
         }
 
@@ -745,6 +870,9 @@
                 </tr></thead><tbody id="sc-results-tbody"></tbody></table></div>
                 <div class="flex mt-4">
                     <button class="btn btn-primary" onclick="copyScanResults(this)">📋 一键复制全部</button>
+                    <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:6px;">
+                        <input type="checkbox" id="sc-export-latency" onchange="loadScanResults()"> 附带延迟
+                    </label>
                     <a class="btn btn-secondary" id="sc-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
                 </div>
             `;
@@ -814,8 +942,12 @@
                         <td>${r.colo||'—'}</td><td class="text-muted">${t}</td></tr>`;
                 }).join('') || '<tr><td colspan="6" class="text-muted">暂无结果——配置参数后点「开始扫描与测试」</td></tr>';
                 const exp = document.getElementById('sc-export-btn');
-                if(exp) exp.href = `data:text/plain;charset=utf-8,${encodeURIComponent(d.results.map(r=>`${r.ip}:${r.port}`).join('\n'))}`;
-                exp.download = 'cf_scan_results.txt';
+                if (exp) {
+                    const withLat = (()=>{ const c=document.getElementById('sc-export-latency'); return c && c.checked; })();
+                    const lines = d.results.map(r => withLat && r.latency_ms!=null ? `${r.ip}:${r.port}#${r.latency_ms}ms` : `${r.ip}:${r.port}`);
+                    exp.href = `data:text/plain;charset=utf-8,${encodeURIComponent(lines.join('\n'))}`;
+                    exp.download = 'cf_scan_results.txt';
+                }
             }catch(e){}
         }
         function copyScanResults(btn){
@@ -1063,14 +1195,45 @@
                         <button class="btn btn-primary" id="ck-btn-fg" onclick="runCheck('manual')">⚡ 前台测速</button>
                     </div>
                 </div>
+                <div class="chart-container" style="margin-bottom:16px;">
+                    <h3 style="margin-bottom:12px;">🎯 合格判定</h3>
+                    <div class="flex" style="align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label class="text-muted" style="font-size:13px;">合格延迟上限（ms，超过视为不合格，订阅默认不输出）</label>
+                        <input class="form-input" id="ck-threshold" type="number" min="50" max="5000" step="50" style="width:120px;">
+                        <button class="btn btn-primary btn-sm" onclick="saveThreshold(this)">💾 保存并立即重判</button>
+                        <span class="text-muted" style="font-size:12px;" id="ck-threshold-hint"></span>
+                    </div>
+                </div>
                 <div id="ck-progress"></div>
                 <div class="page-header" style="margin-top:28px;"><h2 style="font-size:20px;font-weight:700;">📜 任务历史</h2></div>
                 <div class="table-container"><table><thead><tr>
                     <th>ID</th><th>类型</th><th>状态</th><th>开始时间</th><th>耗时</th><th>结果</th>
                 </tr></thead><tbody id="check-tbody"></tbody></table></div>
             `;
+            loadThreshold();
             loadCheckHistory();
             pollCheckProgress();   // 启动进度轮询
+        }
+
+        async function loadThreshold() {
+            try {
+                const d = await (await fetch(`${API}/settings/check-threshold`)).json();
+                const inp = document.getElementById('ck-threshold');
+                if (inp) inp.value = d.qualified_latency_ms;
+            } catch(e) {}
+        }
+        async function saveThreshold(btn) {
+            const v = parseInt(document.getElementById('ck-threshold').value, 10);
+            if (!(v >= 50 && v <= 5000)) { showToast('请输入 50~5000 之间的毫秒值','error'); return; }
+            btn.disabled = true; btn.textContent = '⏳ 处理中…';
+            try {
+                await (await fetch(`${API}/settings/check-threshold?value=${v}`, { method:'POST' })).json();
+                const r = await (await fetch(`${API}/admin/apply-qualified-latency`, { method:'POST' })).json();
+                showToast(`✅ 已保存 ${v}ms，重判完成：${r.marked_inactive} 个超时节点标记为不可用`, 'success');
+                const hint = document.getElementById('ck-threshold-hint');
+                if (hint) hint.textContent = `当前阈值 ${r.threshold_ms}ms`;
+            } catch(e) { showToast('保存失败','error'); }
+            btn.disabled = false; btn.textContent = '💾 保存并立即重判';
         }
 
         let _ckTimer = null;
@@ -1482,6 +1645,23 @@
 
         // ===== Token 管理 =====
         function renderTokens(main) {
+            fetch(`${API}/tokens/stats`).then(r=>r.json()).then(d => {
+                const items = (d.items||[]).filter(x => x.total_hits > 0);
+                if (!items.length) return;
+                const box = document.createElement('div');
+                box.className = 'chart-container';
+                const gb = b => b >= 1073741824 ? (b/1073741824).toFixed(2)+' GB' : b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
+                const hdr = '\u8ba2\u9605\u5206\u53d1\u7edf\u8ba1';
+                box.innerHTML = `<h3 style="margin-bottom:12px;">\uD83D\uDCC8 ${hdr}</h3>
+                    <div class="table-container" style="box-shadow:none;"><table><thead><tr>
+                    <th>Token</th><th>\u603b\u8bbf\u95ee</th><th>\u4eca\u65e5</th><th>\u7d2f\u8ba1\u6d41\u91cf</th><th>\u5747\u8282\u70b9\u6570</th><th>\u6700\u8fd1 UA</th><th>\u6700\u8fd1\u8bbf\u95ee</th></tr></thead><tbody>
+                    ${items.map(x => `<tr><td>${(x.label||'').slice(0,18)}</td><td>${x.total_hits}</td><td>${x.today_hits||0}</td>
+                        <td>${gb(x.total_bytes||0)}</td><td>${Math.round(x.avg_nodes||0)}</td>
+                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${x.last_ua||'-'}</td>
+                        <td>${x.last_seen ? new Date(x.last_seen*1000).toLocaleString() : '-'}</td></tr>`).join('')}
+                    </tbody></table></div>`;
+                main.insertBefore(box, main.querySelector('.page-header').nextSibling);
+            }).catch(()=>{});
             main.innerHTML = `
                 <div class="page-header"><h1 class="page-title">🔑 令牌管理</h1>
                     <button class="btn btn-primary" onclick="showCreateTokenModal()">➕ 创建 Token</button>
@@ -1557,6 +1737,62 @@
             loadTokens();
         }
 
+
+        // ===== 🌒 主题切换 + i18n + 📱 底部Tab（v2.3）=====
+        const I18N = {
+            zh: { overview:'总览', pool:'节点池', cf:'CF 优选', tools:'转换工具',
+                  dashboard:'仪表盘', nodes:'节点列表', map:'世界地图', sources:'节点源',
+                  subscribe_out:'订阅输出', tokens:'令牌管理', check:'测速任务',
+                  cfendpoints:'优选端点', cfscan:'网段扫描', convert:'订阅转换' },
+            en: { overview:'Overview', pool:'Node Pool', cf:'CF Preferred', tools:'Tools',
+                  dashboard:'Dashboard', nodes:'Nodes', map:'World Map', sources:'Sources',
+                  subscribe_out:'Subscribe', tokens:'Tokens', check:'Speed Test',
+                  cfendpoints:'Endpoints', cfscan:'Subnet Scan', convert:'Convert' }
+        };
+        let curLang = localStorage.getItem('np_lang') || 'zh';
+        function applyLang() {
+            const dict = I18N[curLang] || I18N.zh;
+            document.querySelectorAll('[i18n]').forEach(el => {
+                const k = el.getAttribute('i18n');
+                if (dict[k]) el.textContent = dict[k];
+            });
+            const lb = document.getElementById('lang-btn'); if (lb) lb.textContent = curLang === 'zh' ? 'EN' : '中';
+        }
+        function toggleLang() {
+            curLang = curLang === 'zh' ? 'en' : 'zh';
+            localStorage.setItem('np_lang', curLang);
+            document.querySelectorAll('.nav-group').forEach((el,i) => {
+                const keys = ['overview','pool','cf','tools'];
+                if (keys[i]) el.textContent = I18N[curLang][keys[i]];
+            });
+            document.querySelectorAll('nav:not(#bottom-tab) .nav-item').forEach(el => {
+                const p = el.dataset.page; if (I18N[curLang][p]) {
+                    const icon = el.textContent.trim().split(/\s+/)[0];
+                    el.textContent = icon + ' ' + I18N[curLang][p];
+                }
+            });
+            document.querySelectorAll('#bottom-tab span[i18n]').forEach(el => applyLang());
+            try { if (typeof currentPage !== 'undefined') goPage(currentPage); } catch(e) {}
+        }
+        function toggleTheme() {
+            const html = document.documentElement;
+            const next = html.getAttribute('data-theme') === 'dark' ? '' : 'dark';
+            if (next) html.setAttribute('data-theme', next); else html.removeAttribute('data-theme');
+            localStorage.setItem('np_theme', next || 'light');
+            const tb = document.getElementById('theme-btn'); if (tb) tb.textContent = next === 'dark' ? '☀️' : '🌙';
+            try { if (typeof currentPage !== 'undefined' && currentPage) goPage(currentPage); } catch(e) {}
+        }
+        (function initTheme(){
+            const t = localStorage.getItem('np_theme');
+            if (t === 'dark') { document.documentElement.setAttribute('data-theme','dark');
+                const tb = document.getElementById('theme-btn'); if (tb) tb.textContent = '☀️'; }
+            curLang = localStorage.getItem('np_lang') || 'zh';
+        })();
+        function btGo(el) {
+            goPage(el.dataset.page);
+            document.querySelectorAll('#bottom-tab > div').forEach(d => d.classList.toggle('active', d === el));
+        }
+
         // ===== 初始化 =====
         renderPage('dashboard');
 
@@ -1581,5 +1817,12 @@
         refreshSidebarStats();
         setInterval(refreshSidebarStats, 30000);
     </script>
+<nav id="bottom-tab">
+    <div data-page="dashboard" onclick="btGo(this)">📊<span i18n="dashboard">仪表盘</span></div>
+    <div data-page="nodes" onclick="btGo(this)">🔗<span i18n="nodes">节点</span></div>
+    <div data-page="subscribe" onclick="btGo(this)">📥<span i18n="subscribe_out">输出</span></div>
+    <div data-page="cfendpoints" onclick="btGo(this)">🌐<span i18n="cfendpoints">优选</span></div>
+    <div data-page="convert" onclick="btGo(this)">🔄<span i18n="convert">转换</span></div>
+</nav>
 </body>
 </html>

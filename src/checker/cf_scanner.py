@@ -26,6 +26,11 @@ SPEED_URLS = [
     {"key": "ovh", "name": "OVH (欧)", "url": "https://proof.ovh.net/files/10Mb.dat"},
     {"key": "tele2", "name": "Tele2 (欧)", "url": "http://speedtest.tele2.net/10MB.zip"},
     {"key": "tb", "name": "ThinkBroadband (英)", "url": "http://ipv4.download.thinkbroadband.com/10MB.zip"},
+    {"key": "aliyun", "name": "阿里云 (沪)", "url": "https://mirrors.aliyun.com/ubuntu-releases/24.04/ubuntu-24.04.3-live-server-amd64.iso"},
+    {"key": "tsinghua", "name": "清华 TUNA (京)", "url": "https://mirrors.tuna.tsinghua.edu.cn/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso"},
+    {"key": "ustc", "name": "中科大 (合)", "url": "https://mirrors.ustc.edu.cn/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso"},
+    {"key": "tencent", "name": "腾讯云 (境内)", "url": "https://mirrors.cloud.tencent.com/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso"},
+    {"key": "huawei", "name": "华为云 (境内)", "url": "https://mirrors.huaweicloud.com/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso"},
 ]
 
 # CF 支持的 HTTPS 明文可选端口（截图「测试端口」下拉）
@@ -253,7 +258,7 @@ async def run_scan(params: dict) -> dict:
                     ok = bool(body and b"colo=" in body)
                     lat = None
                 else:
-                    lat = await _tcping(ip, port)
+                    lat = await _tcping_core(ip, port)
                     ok = lat is not None and lat <= max_latency
                 STATE["scanned"] += 1
                 if ok:

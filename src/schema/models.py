@@ -54,6 +54,7 @@ class Node:
     updated_at: Optional[int] = None
     fingerprint: Optional[str] = None
     last_seen_at: Optional[int] = None
+    favorite: int = 0
 
 
 @dataclass

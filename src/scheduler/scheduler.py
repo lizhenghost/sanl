@@ -121,6 +121,11 @@ class Scheduler:
         days = self.config.get("auto_clean_days", 7)
         repository.clean_old_jobs(days)
         repository.clean_old_nodes(days)
+        try:
+            st = repository.clean_old_stats(history_days=7, access_days=30)
+            logger.info(f"Cleaned stats: {st}")
+        except Exception as e:
+            logger.warning(f"clean stats failed: {e}")
         logger.info(f"Cleaned data older than {days} days")
 
     def shutdown(self):

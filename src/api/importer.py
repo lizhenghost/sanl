@@ -395,6 +395,8 @@ def parse_host_port(line: str) -> Tuple[str, dict, str]:
 _DOMAIN_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$', re.IGNORECASE)
 
 
+import ipaddress
+
 from ..utils.net import detect_isp as _detect_isp_shared, detect_ip_version as _detect_ipv_shared
 
 

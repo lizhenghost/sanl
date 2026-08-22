@@ -6,13 +6,36 @@ services:
     ports:
       - "8899:8899"
     volumes:
-      - ./data:/app/data          # SQLite 数据库持久化
-      - ./output:/app/output      # subs-check 输出
+      - ./data:/app/data          # SQLite 数据库持久化（建议本地盘/容器卷，NFS 上 SQLite 不可靠）
+      - ./output:/app/output      # subs-check 测速输出
       - ./config:/app/config      # 配置文件
+      - ./static:/app/static      # 前端静态资源（便于自定义）
     environment:
       - TZ=Asia/Shanghai
+      # 可选：GeoIP 服务 token（不配则用免费源）
+      # - IPINFO_TOKEN=xxx
+    logging:
+      driver: json-file           # 防日志撑爆磁盘
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8899/api/nodes/stats"]
       interval: 60s
       timeout: 10s
       retries: 3
+      start_period: 30s
+    stop_grace_period: 15s       # 给测速子进程清理时间
+
+  # 可选：反向代理 + 自动 HTTPS（Caddy 无需手动证书）
+  # caddy:
+  #   image: caddy:2-alpine
+  #   container_name: nodepool-caddy
+  #   restart: unless-stopped
+  #   ports: ["80:80", "443:443"]
+  #   volumes:
+  #     - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data
+  #   depends_on: [nodepool]
+  # volumes:
+  #   caddy_data:

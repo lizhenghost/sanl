@@ -1,43 +1,36 @@
-# NodePool 配置文件
-# 节点池聚合平台配置
-
 app:
-  name: "NodePool"
-  version: "2.2.0"
+  api_key: changeme
   debug: true
-  host: "0.0.0.0"
+  host: 0.0.0.0
+  name: NodePool
   port: 8899
-  api_key: "changeme"  # Web API 认证密钥
-
+  version: 2.2.0
 database:
-  path: "./data/nodes.db"
-
-subs_check:
-  binary_path: "./subs-check"
-  config_path: "./config/subs-check.yaml"
-  output_dir: "./output"
-  listen_port: ":8199"
-  # 测速并发配置
-  concurrent: 30
-  speed_concurrent: 10
-  timeout: 8000  # ms
-  min_speed: 256  # KB/s
-  speed_test_url: "https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z"
-
+  path: ./data/nodes.db
+scheduler:
+  auto_clean_days: 7
+  check_cron: 0 * * * *
+  fetch_cron: 0 */6 * * *
+  qualified_latency_ms: 200
 sources:
   github:
     enabled: true
-    refresh_interval: 3600  # seconds
     proxies:
-      - "https://ghfast.top/"
+    - https://ghfast.top/
+    refresh_interval: 3600
+  static_json:
+    enabled: true
+    path: ./data/sources.json
   telegram:
     enabled: true
     refresh_interval: 7200
-  static_json:
-    enabled: true
-    path: "./data/sources.json"
-
-scheduler:
-  fetch_cron: "0 */6 * * *"   # 每6小时抓取
-  check_cron: "0 */4 * * *"    # 从每日零点起每4小时测速(0/4/8/12/16/20点)
-  auto_clean_days: 7           # 自动清理7天前的数据
+subs_check:
+  binary_path: ./subs-check
+  concurrent: 30
+  config_path: ./config/subs-check.yaml
+  listen_port: :8199
+  min_speed: 256
+  output_dir: ./output
+  speed_concurrent: 10
+  speed_test_url: https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z
+  timeout: 8000
