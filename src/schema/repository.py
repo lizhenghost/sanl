@@ -504,10 +504,10 @@ def list_nodes(status: Optional[str] = None, country: Optional[str] = None, node
             query += " AND latency IS NOT NULL AND latency <= ?"
             params.append(max_latency)
 
-        # 排序白名单防注入
-        sort_cols = {"latency": "latency", "speed": "download_speed", "score": "score",
-                     "created": "created_at", "name": "node_name", "country": "country"}
-        col = sort_cols.get(sort, "latency")
+        # 排序白名单防注入（统一加 n. 前缀：JOIN sources 后 created_at/name 等列名歧义）
+        sort_cols = {"latency": "n.latency", "speed": "n.download_speed", "score": "n.score",
+                     "created": "n.created_at", "name": "n.node_name", "country": "n.country"}
+        col = sort_cols.get(sort, "n.latency")
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         # NULL 值排最后
         query += f" ORDER BY ({col} IS NULL) ASC, {col} {direction} LIMIT ? OFFSET ?"
