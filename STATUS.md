@@ -2,12 +2,42 @@
 
 **更新时间**: 2026-08-22 UTC
 **项目名**: sanl
-**方案版本**: v2.1 + 全协议扩展 + 竞态修复（2026-08-22 本轮）
-**域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，HTTPS 200 ✅，HTTP 自动 301 → HTTPS ✅）
-**服务**: http://127.0.0.1:8899（PID 3639，707 节点 / 38 国）
-**GitHub**: https://github.com/lizhenghost/sanl（本地最新 a2aad95 待推：旧 PAT 已撤销）
+**方案版本**: v2.1 + 导入架构重构（2026-08-22 本轮，commit 78eb9f7）
+**域名**: lzsanlzhuanhuan.kdns.fr（Cloudflare Tunnel，HTTPS 200 ✅）
+**服务**: http://127.0.0.1:8899（节点池 7378：593 active / 6785 unknown，CF优选端点 3803）
+**GitHub**: https://github.com/lizhenghost/sanl（本地最新 78eb9f7 待推：旧 PAT 已撤销）
 
-## 2026-08-22 本轮修复（a2aad95）
+## 2026-08-22 第二轮：导入架构重构（78eb9f7）
+### 根因诊断
+用户反馈「源加起来应有五六千节点但只有707」+「手动导入被清空」。排查确认四大病灶：
+1. **测速回填用 `DELETE FROM nodes` 全清重建** → 每轮只留 subs-check 幸存者（707），手动导入/池内其他节点全部蒸发。
+2. **定时器 `_fetch_sources` 只记健康度从不导入节点**，且每次把 node_count 重置为 0（前端全显示 0）。
+3. **37 个 CF 优选域名文件混进 subs-check 测速配置** → 垃圾输入拖垮全流程；老僵尸进程（PID 2551）占住 8199 端口导致新任务无限重启循环。
+4. **导出 limit 上限 2000**、格式只有 5 种。
+
+### 架构修复（核心）
+- **新池导入器** `src/scheduler/pool_importer.py`：遍历 DB 启用源 → 抓取（GitHub 镜像回退链 gh-proxy/ghfast/ghproxy.net）→ 统一解析 → **指纹 upsert 入库**。实测 6 秒解析 **20,528 节点**，去重后入库 **7,222 新节点**。
+- **节点唯一指纹** `(type|server|port|凭据)` MD5 + 唯一索引；迁移自动回填历史行并清理 449 条重复。
+- **测速结果回填不删库**：`apply_check_results()` 按指纹匹配置 active + 回填速度/延迟/国家；未命中的旧 active 转 inactive；**手动导入节点永不降级、永不删除**。已合成数据验证：总数只增不减 ✅。
+- **NULL 指纹陷阱修复**：`NOT IN` 遇 NULL 永假导致失活标记失效——迁移回填后归零。
+- **subs-check 配置过滤**：data:/manual/cf-list 类型不再进测速（37 个 CF 文件剔除）；11 个 CF 列表源标记为 cf-list 类型。
+- **僵尸进程治理**：启动前 pkill 残留 + `start_new_session` 进程组整组清理 + finally 兜底 terminate。
+
+### 新增能力
+- **解析**：sing-box JSON 订阅自动识别；CF 优选 host:port 列表分离到 `cf_endpoints` 表（3803 个端点），不再伪装成 trojan 节点。
+- **导出 10 格式**：clash / clash-meta / singbox / v2ray / base64 / txt / mixed / **surge** / **loon** / **quantumult x**（后三者为本次新增生成器）。
+- **订阅参数扩展**：`status=all` 全池导出（含未测）、`proto=` 协议过滤（实测 proto=trojan → 970 条）、limit 上限 200→20000。
+- **API**：POST `/api/sources/import-all`（后台全量导入按钮）、POST `/api/sources/{id}/reimport`、GET `/api/cf/endpoints`。
+- **前端**：格式下拉 5→10 项、「🔄 全量导入」按钮、订阅 URL 类型自动识别（github/http）。
+
+### 验证记录
+- 全量导入：43 源成功 / parsed 20528 / inserted 7222 / CF端点 3768 ✅
+- 导出格式 HTTP 实测：clash-meta/surge(294行)/loon/qx/mixed/base64/singbox 全通 ✅
+- status=all 全池导出 7826 链接 ✅；指纹跨次运行去重 inserted:0 ✅
+- 合成测速验证：active 594→1、其余转 inactive、手动节点保留、总数只增 ✅
+
+## 2026-08-22 第一轮（a2aad95）
+
 - **根因**：「数据源加载失败: Cannot set properties of null」= 前端异步竞态——在「数据源」页发起的 fetch 未返回时切到其他页面，回调往已销毁 DOM 写 innerHTML 抛 null 错误并弹误导性 toast。
 - **修复**：loadSources/loadCheckHistory/loadDashboard/loadMapData/loadTokens/renderNodeTable/renderNodePage/filterNodes/drawPieChart/drawBarChart 全部加页面切换守卫；loadCheckHistory 文案改为「测速记录加载失败」。
 - **HTTPS**：nginx 增加 `X-Forwarded-Proto = http → 301 https` 强制跳转；Cloudflare 边缘证书（Google Trust Services, *.kdns.fr）本就自动可用，https:// 直达。
