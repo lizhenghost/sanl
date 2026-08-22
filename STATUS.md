@@ -1,4 +1,11 @@
-# NodePool 运行态快照 — v2.3.1 (97af632, 已推GitHub)
+# NodePool 运行态快照 — v2.3.2 (cf62c8c+, 已推GitHub)
+
+## 全局进度条 + 抓取提速 (2026-08-22 第二轮)
+- fetch_cron 改每小时整点（用户要求，此前仅测速是每小时、抓取仍6h）
+- src/utils/taskmgr.py 全局任务管理器：fetch/check 统一注册进度
+- GET /api/tasks + 前端顶部悬浮进度条(实时%·当前源名·耗时)，测速/抓取全程可见
+- 清理 18 个死源(11 static文件丢失+7 discover猜错路径)，剩81个启用源
+- 巡检：pyflakes undefined=0 / JS语法过 / 回归15/15
 
 ## 方案v2.1最终对照补全 (2026-08-22)
 对照初始大纲 node-pool-platform-proposal-v2.md 逐项 grep 实测,12项缺口落地:

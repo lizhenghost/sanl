@@ -26,12 +26,16 @@ async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional
     """
     执行全源导入。返回摘要 dict。
     source_id 指定时只导入该源（单源刷新）。
+    全程向 task_manager 汇报进度（前端进度条）。
     """
     own = scraper is None
     sc = scraper or Scraper()
     started = time.time()
     summary = {"sources_total": 0, "sources_ok": 0, "sources_failed": 0,
                "parsed": 0, "inserted": 0, "updated": 0, "cf_endpoints": 0, "errors": []}
+    from ..utils.taskmgr import task_manager
+    tid = "fetch"
+    task_manager.start(tid, "📥 全量抓取源")
     try:
         sources = repository.list_sources(enabled_only=True)
         if source_id:
@@ -39,17 +43,29 @@ async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional
         # 手动导入源不参与自动池导入（内容已在导入时入库）
         sources = [s for s in sources if s.source_type != "manual"]
         summary["sources_total"] = len(sources)
+        task_manager.update(tid, total=len(sources), detail=f"共 {len(sources)} 个源")
 
         sem = asyncio.Semaphore(FETCH_CONCURRENCY)
 
+        done_counter = {"n": 0}
+
         async def _one(src):
             async with sem:
-                return await _import_one(sc, src, summary)
+                task_manager.update(tid, detail=f"抓取: {src.name[:40]}")
+                r = await _import_one(sc, src, summary)
+                done_counter["n"] += 1
+                task_manager.update(tid, done=done_counter["n"],
+                                    detail=f"完成 {done_counter['n']}/{len(sources)} · 成功{summary['sources_ok']} 失败{summary['sources_failed']}")
+                return r
 
         await asyncio.gather(*[_one(s) for s in sources])
         summary["elapsed_sec"] = round(time.time() - started, 1)
+        task_manager.finish(tid)
         logger.info(f"池导入完成: {summary}")
         return summary
+    except Exception as e:
+        task_manager.finish(tid, error=str(e)[:120])
+        raise
     finally:
         if own:
             await sc.close()

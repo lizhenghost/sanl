@@ -163,6 +163,9 @@ class Checker:
         self._job_init(getattr(job_id, "id", job_id), trigger)
         job = self.current_job
 
+        from ..utils.taskmgr import task_manager
+        TASK_ID = "check"
+        task_manager.start(TASK_ID, "⚡ 全量测速")
         try:
             sources = repository.list_sources(enabled_only=True)
             if not sources:
@@ -171,12 +174,16 @@ class Checker:
                 job.update({"status": "failed", "finished_at": time.time(), "error": "No enabled sources"})
                 return {"status": "no_sources", "job_id": job_id}
 
+            task_manager.update(TASK_ID, phase="running",
+                                detail=f"准备 {len(sources)} 个源订阅")
             await self._update_subs_check_config(sources)
 
             import time as _t
             job_start_ts = int(_t.time())
             logger.info(f"Starting subs-check with {len(sources)} sources ({trigger})")
+            task_manager.update(TASK_ID, detail="subs-check 测试中（拉取/解析/连通性/延迟速度）…")
             result = await self._run_subs_check()
+            task_manager.update(TASK_ID, done=1, total=2, detail="入库与评分计算中…")
 
             if result.get("success"):
                 await self._parse_and_store_results(result)
@@ -186,6 +193,7 @@ class Checker:
                 logger.info(f"Updated scores for {scored} nodes")
                 repository.update_check_job(job_id.id, "completed", result=json.dumps(result))
                 job.update({"status": "completed", "finished_at": time.time()})
+                task_manager.finish(TASK_ID)
                 # 健康历史快照（近 7 天趋势数据源，附录：优化 #4）
                 try:
                     snap = repository.record_health_snapshot(job_start_ts)
@@ -211,6 +219,7 @@ class Checker:
             return result
 
         except Exception as e:
+            task_manager.finish(TASK_ID, error=str(e)[:120])
             logger.error(f"Check failed: {e}")
             repository.update_check_job(job_id.id, "failed", error=str(e))
             job.update({"status": "failed", "finished_at": time.time(), "error": str(e)})

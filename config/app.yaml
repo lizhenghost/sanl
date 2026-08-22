@@ -10,7 +10,7 @@ database:
 scheduler:
   auto_clean_days: 7
   check_cron: 0 * * * *
-  fetch_cron: 0 */6 * * *
+  fetch_cron: 0 * * * *      # 每小时整点自动抓取全部源
   qualified_latency_ms: 200
 sources:
   github:

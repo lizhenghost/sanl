@@ -1099,6 +1099,13 @@ async def get_sources_health():
     return health
 
 
+@api_router.get("/tasks")
+async def get_tasks():
+    """全局任务进度（抓取/测速等后台任务统一视图，前端进度条数据源）"""
+    from ..utils.taskmgr import task_manager
+    return {"active": task_manager.get_active(), "recent": task_manager.get_recent(3)}
+
+
 @api_router.post("/sources/fetch-all")
 async def fetch_all_sources_now(background: BackgroundTasks):
     """立即触发全量源抓取（不等每6h定时；新导入的源马上验证可用性）"""
