@@ -16,7 +16,7 @@
             --shadow-lg: 0 4px 8px rgba(30,64,175,.10), 0 12px 32px rgba(30,64,175,.12);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: auto; }
         .container { display: flex; min-height: 100vh; }
         .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
         .main { flex: 1; padding: 30px; overflow-y: auto; min-width: 0; }
@@ -33,7 +33,8 @@
         .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
         .stat-value { font-size: 36px; font-weight: bold; color: var(--primary); }
         .stat-label { color: var(--text-muted); margin-top: 8px; }
-        .table-container { background: var(--surface); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); box-shadow: var(--shadow); }
+        .table-container { background: var(--surface); border-radius: 14px; overflow-x: auto; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); box-shadow: var(--shadow); }
+        .table-container table { min-width: 640px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
         th { background: var(--surface-2); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .4px; white-space: nowrap; }
