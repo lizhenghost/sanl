@@ -75,6 +75,8 @@ def _migrate(conn):
     if cols and "isp" not in cols:
         conn.execute("ALTER TABLE cf_endpoints ADD COLUMN isp TEXT NOT NULL DEFAULT 'all'")
         _backfill_cf_isp(conn)
+    if cols and "latency_ms" not in cols:
+        conn.execute("ALTER TABLE cf_endpoints ADD COLUMN latency_ms INTEGER")
     conn.commit()
 
 
@@ -215,19 +217,34 @@ def apply_check_results(results: List[dict]) -> dict:
     return {"alive": alive, "marked_inactive": marked}
 
 
-def get_cf_endpoints(limit: int = 5000, isp: Optional[str] = None) -> list:
+def get_cf_endpoints(limit: int = 5000, isp: Optional[str] = None,
+                     sort: str = "id", only_alive: bool = False) -> list:
+    order = {"latency": "latency_ms IS NULL, latency_ms ASC, id",
+             "id": "id"}.get(sort, "id")
+    where, params = "", []
+    if isp and isp != "any":
+        where += " WHERE isp = ?"
+        params.append(isp)
+    if only_alive:
+        where += (" AND" if where else " WHERE") + " latency_ms IS NOT NULL"
     with get_connection() as conn:
-        if isp and isp != "any":
-            rows = conn.execute(
-                "SELECT host, port, remark, source_id, last_seen_at, isp FROM cf_endpoints "
-                "WHERE isp = ? ORDER BY id LIMIT ?", (isp, limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT host, port, remark, source_id, last_seen_at, isp FROM cf_endpoints "
-                "ORDER BY id LIMIT ?", (limit,)
-            ).fetchall()
+        rows = conn.execute(
+            f"SELECT host, port, remark, source_id, last_seen_at, isp, latency_ms "
+            f"FROM cf_endpoints{where} ORDER BY {order} LIMIT ?",
+            (*params, limit)
+        ).fetchall()
         return [dict(r) for r in rows]
+
+
+def save_cf_latencies(results: List[dict]) -> int:
+    """批量写回 tcping 结果 [{host, port, latency_ms(None=失败)}]"""
+    with get_connection() as conn:
+        conn.executemany(
+            "UPDATE cf_endpoints SET latency_ms = ? WHERE host = ? AND port = ?",
+            [(r.get("latency_ms"), r["host"], int(r.get("port", 443))) for r in results]
+        )
+        conn.commit()
+        return len(results)
 
 
 def cf_isp_stats() -> dict:

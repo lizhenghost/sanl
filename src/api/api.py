@@ -4,7 +4,7 @@ FastAPI 主应用
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.routing import APIRouter
@@ -225,13 +225,32 @@ async def reimport_single_source(source_id: int):
 async def list_cf_endpoints(
     limit: int = Query(2000, le=20000),
     isp: Optional[str] = Query(None, pattern="^(telecom|mobile|unicom|all|any)$",
-                               description="运营商筛选：telecom电信/mobile移动/unicom联通/all三网通用/any全部")
+                               description="运营商筛选：telecom电信/mobile移动/unicom联通/all三网通用/any全部"),
+    sort: str = Query("id", pattern="^(latency|id)$", description="latency=按TCP延迟升序"),
+    only_alive: bool = Query(False, description="仅返回延迟检测存活的端点")
 ):
-    """CF 优选 IP/域名端点列表（host:port，独立于代理节点），支持按运营商筛选"""
-    items = repository.get_cf_endpoints(limit=limit, isp=isp)
+    """CF 优选 IP/域名端点列表（host:port，独立于代理节点），支持按运营商筛选与延迟排序"""
+    items = repository.get_cf_endpoints(limit=limit, isp=isp, sort=sort, only_alive=only_alive)
     return {"total": repository.count_cf_endpoints(),
             "by_isp": repository.cf_isp_stats(),
             "endpoints": items}
+
+
+@api_router.post("/cf/ping")
+async def ping_cf_endpoints(
+    background_tasks: BackgroundTasks,
+    isp: str = Query("any", pattern="^(telecom|mobile|unicom|all|any)$"),
+    limit: int = Query(5000, le=20000)
+):
+    """对 CF 优选端点发起一轮 TCP 延迟检测（后台执行，前端轮询列表看结果）"""
+    from ..checker import cf_ping
+
+    async def _run():
+        await cf_ping.ping_all(isp=isp, limit=limit)
+
+    background_tasks.add_task(_run)
+    return {"status": "started",
+            "message": f"延迟检测已启动（{isp}，最多 {limit} 个端点），约 30-60 秒后刷新查看"}
 
 
 @api_router.get("/cf/endpoints/export")

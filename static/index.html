@@ -539,12 +539,20 @@
                                 <option value="unicom">📶 联通优选</option>
                                 <option value="all">🌐 三网通用</option>
                             </select>
+                            <select class="form-input" style="width:130px;" id="cf-sort-filter" onchange="loadCfEndpoints()">
+                                <option value="latency">⚡ 延迟优先</option>
+                                <option value="id">🕐 默认顺序</option>
+                            </select>
+                            <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:4px;">
+                                <input type="checkbox" id="cf-only-alive" onchange="loadCfEndpoints()">仅存活
+                            </label>
+                            <button class="btn btn-primary" id="cf-ping-btn" onclick="pingCfEndpoints(this)">⚡ 测延迟</button>
                             <button class="btn btn-secondary" onclick="copyCfEndpoints(this)">📋 复制当前</button>
                             <a class="btn btn-secondary" id="cf-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
                         </div>
-                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；每轮「全量导入」自动刷新</p>
+                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；延迟为 TCP 握手 RTT（本机视角），每轮「全量导入」自动刷新列表</p>
                         <div class="table-container" style="max-height:480px;overflow-y:auto;"><table><thead><tr>
-                            <th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
+                            <th>延迟</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
                         </tr></thead><tbody id="cf-tbody"></tbody></table></div>
                     </div>
                 </div>
@@ -557,7 +565,9 @@
         function ispLabel(isp){ return ({telecom:'📶 电信',mobile:'📶 移动',unicom:'📶 联通',all:'🌐 三网'})[isp] || isp || 'all'; }
         async function loadCfEndpoints(){
             try{
-                const res = await fetch(`${API}/cf/endpoints?limit=20000`);
+                const sort = (document.getElementById('cf-sort-filter')||{}).value || 'latency';
+                const alive = document.getElementById('cf-only-alive')?.checked ? '&only_alive=true' : '';
+                const res = await fetch(`${API}/cf/endpoints?limit=20000&sort=${sort}${alive}`);
                 if(!res.ok) throw new Error(await res.text());
                 const d = await res.json();
                 cfData = d.endpoints||[];
@@ -570,6 +580,24 @@
                 renderCfTable();
             }catch(e){ showToast('❌ CF优选加载失败: '+e.message,'error'); }
         }
+        function cfLatencyBadge(la){
+            if (la == null) return '<span class="text-muted">—</span>';
+            const cls = la < 100 ? 'badge-success' : la < 200 ? 'badge-warning' : 'badge-danger';
+            return `<span class="badge ${cls}">${la}ms</span>`;
+        }
+        async function pingCfEndpoints(btn){
+            btn.disabled = true; btn.textContent = '⏳ 检测中…';
+            try{
+                const isp = (document.getElementById('cf-isp-filter')||{}).value || 'any';
+                const res = await fetch(`${API}/cf/ping?isp=${isp}&limit=20000`, {method:'POST'});
+                if(!res.ok) throw new Error(await res.text());
+                showToast('⚡ 延迟检测已启动，约 30-60 秒后自动刷新','success');
+                setTimeout(()=>{ loadCfEndpoints(); btn.disabled=false; btn.textContent='⚡ 测延迟'; }, 45000);
+            }catch(e){
+                showToast('❌ 启动失败: '+e.message,'error');
+                btn.disabled=false; btn.textContent='⚡ 测延迟';
+            }
+        }
         function renderCfTable(){
             const tb = document.getElementById('cf-tbody'); if(!tb) return;
             const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
@@ -578,8 +606,8 @@
             const rows = cfData.filter(e=>f==='any'||e.isp===f);
             tb.innerHTML = rows.slice(0,1000).map(e=>{
                 const t = e.last_seen_at ? new Date(e.last_seen_at*1000).toLocaleString() : '-';
-                return `<tr><td><code>${e.host}:${e.port}</code></td><td>${e.remark||''}</td><td>${ispLabel(e.isp)}</td><td class="text-muted">${t}</td></tr>`;
-            }).join('') || '<tr><td colspan="4" class="text-muted">暂无数据——先到源列表页点「🔄 全量导入」</td></tr>';
+                return `<tr><td>${cfLatencyBadge(e.latency_ms)}</td><td><code>${e.host}:${e.port}</code></td><td>${e.remark||''}</td><td>${ispLabel(e.isp)}</td><td class="text-muted">${t}</td></tr>`;
+            }).join('') || '<tr><td colspan="5" class="text-muted">暂无数据——先到源列表页点「🔄 全量导入」</td></tr>';
         }
         function copyCfEndpoints(btn){
             const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
