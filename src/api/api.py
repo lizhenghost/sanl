@@ -4,12 +4,12 @@ FastAPI 主应用
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.routing import APIRouter
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from ..config import get_app_config, get_scheduler_config
 from ..schema import repository, models
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     global scheduler
     
     # 启动时初始化
-    logger.info("Initializing NodePool...")
+    logger.info("Initializing Sanl...")
     repository.init_db()
     
     scheduler = Scheduler()
@@ -38,14 +38,14 @@ async def lifespan(app: FastAPI):
     # 关闭时清理
     if scheduler:
         scheduler.shutdown()
-    logger.info("NodePool stopped")
+    logger.info("Sanl stopped")
 
 
 def create_app() -> FastAPI:
     app_config = get_app_config()
     
     app = FastAPI(
-        title=app_config.get("name", "NodePool"),
+        title=app_config.get("name", "Sanl"),
         version=app_config.get("version", "1.0.0"),
         description="免费节点池聚合平台",
         lifespan=lifespan,
@@ -71,6 +71,20 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index():
         return FileResponse(os.path.join(static_dir, "index.html"))
+
+    # PWA 根路径文件：sw.js 必须在根 scope 才能控制全站缓存
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker():
+        return FileResponse(os.path.join(static_dir, "sw.js"),
+                            media_type="application/javascript",
+                            headers={"Cache-Control": "no-cache",
+                                     "Service-Worker-Allowed": "/"})
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    async def webmanifest():
+        return FileResponse(os.path.join(static_dir, "manifest.webmanifest"),
+                            media_type="application/manifest+json",
+                            headers={"Cache-Control": "no-cache"})
     
     # 包含路由
     app.include_router(api_router, prefix="/api")
@@ -727,17 +741,25 @@ async def refresh_ranking():
 # ===== 检查任务接口 =====
 
 @api_router.post("/check/run")
-async def run_check(trigger: str = "manual"):
-    """触发一次测速：manual=前台(页面实时进度) / scheduled=后台(定时调度同款)"""
+async def run_check(
+    trigger: str = "manual",
+    mode: str = Query("speed", description="测速维度: latency=仅延迟 / speed=延迟+速度 / full=全量含流媒体"),
+    overrides: Optional[Dict] = Body(None, description="可选参数覆盖: concurrent/timeout/min-speed/download-mb/download-timeout/speed-concurrent 等"),
+):
+    """触发一次测速：manual=前台(页面实时进度) / scheduled=后台(定时调度同款)
+    mode 可选测试维度；overrides 仅接受白名单键"""
     if trigger not in ("manual", "scheduled"):
         raise HTTPException(status_code=400, detail="trigger must be manual|scheduled")
+    if mode not in ("latency", "speed", "full"):
+        raise HTTPException(status_code=400, detail="mode must be latency|speed|full")
     ck = scheduler.checker
     if ck.current_job and ck.current_job.get("status") == "running":
         return {"status": "already_running", "job_id": ck.current_job["job_id"],
                 "source": ck.current_job["source"]}
     import asyncio
-    asyncio.create_task(ck.run_check(trigger=trigger))
-    return {"status": "started", "trigger": trigger}
+    asyncio.create_task(ck.run_check(trigger=trigger, mode=mode,
+                                     overrides=overrides if isinstance(overrides, dict) else None))
+    return {"status": "started", "trigger": trigger, "mode": mode}
 
 
 @api_router.get("/check/progress")
@@ -770,7 +792,7 @@ async def check_job_detail(job_id: int):
 async def get_version():
     """版本信息（前端 logo 动态展示）"""
     cfg = get_app_config()
-    return {"name": cfg.get("name", "NodePool"),
+    return {"name": cfg.get("name", "Sanl"),
             "version": cfg.get("version", "1.0.0")}
 
 

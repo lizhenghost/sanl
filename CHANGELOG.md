@@ -1,5 +1,25 @@
-# NodePool Changelog
+# Sanl Changelog
 
+
+## v2.4.0 - 2026-08-22
+
+### ⚡ 测速维度可选（本次核心）
+- `POST /api/check/run` 新增 `mode` 参数: `latency`(仅延迟) / `speed`(延迟+速度) / `full`(全量含流媒体)
+- 新增 `overrides` JSON body 白名单覆盖: concurrent/timeout/min-speed/download-mb/download-timeout/speed-concurrent 等
+- 前端测速页新增模式三选卡与高级参数面板；进度条显示当前模式徽章
+- 定时测速默认模式可配: `scheduler.check_mode`（默认 speed）
+
+### 🚀 测速提速
+- 结果文件等待从固定 60s 改为动态稳定检测(~15s)，轮询间隔 5s→3s
+- latency 模式跳过流媒体检测/IP 重命名/速度下载三大耗时项，**实测 97 秒完成 21362 节点全流程**
+
+### 🏷️ 品牌更名
+- 全项目 NodePool → **Sanl**：前端标题/logo、API 文档、日志、User-Agent、构建脚本、CI Release、docker-compose、README/CONTRIBUTING/STATUS
+
+### 📱 安卓 App (PWA)
+- Web App Manifest + Service Worker（根 scope，API 网络优先、静态离线缓存）
+- 应用图标(192/512 + maskable)、主题色、桌面快捷方式（立即测速/订阅输出）
+- README 新增安卓/iOS 安装指南与 TWA 打包 APK 说明
 ## v2.0.0 - 2026-08-21
 
 ### 🚀 Phase 2 新功能

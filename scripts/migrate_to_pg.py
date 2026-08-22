@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""NodePool → PostgreSQL 迁移导出/导入工具（附录：优化 #8）
+"""Sanl → PostgreSQL 迁移导出/导入工具（附录：优化 #8）
 
 用法：
   # 1) 从 SQLite 导出为 JSON 中间格式
-  python3 scripts/migrate_to_pg.py export --sqlite data/nodes.db --out /tmp/nodepool_export.json
+  python3 scripts/migrate_to_pg.py export --sqlite data/nodes.db --out /tmp/sanl_export.json
 
   # 2) 导入到 PostgreSQL（需 psycopg2 或 psycopg[binary]，先建好空库）
-  python3 scripts/migrate_to_pg.py import --pg "postgresql://user:pass@localhost:5432/nodepool" \
-      --dump /tmp/nodepool_export.json
+  python3 scripts/migrate_to_pg.py import --pg "postgresql://user:pass@localhost:5432/sanl" \
+      --dump /tmp/sanl_export.json
 
 说明：
 - 节点数破 5 万、写锁成为瓶颈时再迁移；日常规模（<1万）SQLite WAL 已足够。
@@ -108,14 +108,14 @@ def do_import(pg_dsn: str, dump_path: str, truncate: bool = False):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="NodePool SQLite→PostgreSQL 迁移工具")
+    ap = argparse.ArgumentParser(description="Sanl SQLite→PostgreSQL 迁移工具")
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("export")
     e.add_argument("--sqlite", default="data/nodes.db")
-    e.add_argument("--out", default="/tmp/nodepool_export.json")
+    e.add_argument("--out", default="/tmp/sanl_export.json")
     i = sub.add_parser("import")
     i.add_argument("--pg", required=True, help="PostgreSQL DSN")
-    i.add_argument("--dump", default="/tmp/nodepool_export.json")
+    i.add_argument("--dump", default="/tmp/sanl_export.json")
     i.add_argument("--truncate", action="store_true", help="导入前清空目标表")
     args = ap.parse_args()
     if args.cmd == "export":

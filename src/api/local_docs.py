@@ -11,7 +11,7 @@ def register_local_docs(app):
 <html lang="zh">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NodePool API 文档</title>
+<title>Sanl API 文档</title>
 <style>
 :root{--bg:#f8fafc;--card:#fff;--bd:#e2e8f0;--tx:#0f172a;--mut:#64748b;--blu:#2563eb}
 .dark{--bg:#0f172a;--card:#1e293b;--bd:#334155;--tx:#f1f5f9;--mut:#94a3b8}
@@ -37,7 +37,7 @@ button.pri{background:var(--blu);color:#fff;border:none;font-weight:600}
 </style>
 </head>
 <body><div class="wrap">
-<h1>📚 NodePool API 文档</h1>
+<h1>📚 Sanl API 文档</h1>
 <div class="sub">本地渲染 · 无外部 CDN 依赖 · 数据来自 /openapi.json — 点击端点展开在线调试</div>
 <div class="bar">
   <select id="fmeth"><option value="">全部方法</option><option>GET</option><option>POST</option></select>

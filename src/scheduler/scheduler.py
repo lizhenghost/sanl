@@ -91,12 +91,13 @@ class Scheduler:
             logger.error(f"Fetch failed: {e}")
 
     async def _run_check(self):
-        """运行测速检查（后台执行，不阻塞）"""
+        """运行测速检查（后台执行，不阻塞）；模式取 config scheduler.check_mode（默认 speed）"""
         logger.info("Starting speed check...")
         # 使用 create_task 让测速在后台运行，不阻塞 event loop
         import asyncio
-        asyncio.create_task(self.checker.run_check(trigger="scheduled"))
-        logger.info("Speed check started in background")
+        mode = self.config.get("check_mode", "speed")
+        asyncio.create_task(self.checker.run_check(trigger="scheduled", mode=mode))
+        logger.info(f"Speed check started in background (mode={mode})")
 
     async def _reenable_sources(self):
         """恢复禁用超时的数据源（连续失败 5 次禁用 24h 后自动重试）"""

@@ -1,4 +1,4 @@
-# NodePool — 免费节点池聚合平台
+# Sanl — 免费节点池聚合平台
 
 > Python FastAPI + subs-check 引擎，纯静态前端，SQLite 存储，MIT 许可，零预算部署
 
@@ -47,7 +47,7 @@ git pull && docker compose up -d --build
 如需 HTTPS：取消 docker-compose.yml 中 caddy 注释段，创建 `deploy/Caddyfile`：
 
     your-domain.com {
-        reverse_proxy nodepool:8899
+        reverse_proxy sanl:8899
     }
 
 ## v2.3 新功能
@@ -70,7 +70,7 @@ git pull && docker compose up -d --build
 
     python3 scripts/migrate_to_pg.py export --sqlite data/nodes.db --out /tmp/export.json
     pip install psycopg2-binary
-    python3 scripts/migrate_to_pg.py import --pg "postgresql://user:pass@host:5432/nodepool" --dump /tmp/export.json
+    python3 scripts/migrate_to_pg.py import --pg "postgresql://user:pass@host:5432/sanl" --dump /tmp/export.json
 
 > 注意：SQLite 数据库请放在本地磁盘或 Docker 卷；NFS 网络文件系统上存在缓存一致性风险。
 
@@ -188,3 +188,30 @@ git push origin v1.0.0
 ## License
 
 MIT。subs-check (GPL-3.0) 以子进程方式隔离调用，主程序保持 MIT。
+
+
+## 📱 安卓 App（PWA）
+
+Sanl 内置完整 PWA 支持，安卓手机无需应用商店，30 秒装到桌面：
+
+### 安装步骤
+1. 手机 Chrome / Edge 访问 `https://你的域名`（或局域网 `http://IP:8899`）
+2. 点击浏览器菜单 → **「添加到主屏幕」/「安装应用」**
+3. 桌面出现 **Sanl** 图标，点开即全屏独立运行（无浏览器地址栏），支持离线打开外壳页面
+
+### 特性
+- 🖥️ 独立窗口运行（standalone），自动适配刘海屏/手势条（viewport-fit=cover）
+- 📶 Service Worker 离线缓存：静态资源秒开；API 数据始终实时拉取
+- ⚡ 桌面长按图标可直达快捷入口：立即测速 / 订阅输出
+- 🎨 自适应系统深色模式（跟随面板主题）
+
+> iOS 同理：Safari 打开 → 分享 → 「添加到主屏幕」。
+
+### 进阶：打包正式 APK（可选）
+如需上架或分发 APK，可用 TWA（Trusted Web Activity）零代码打包：
+
+```bash
+npm i -g @bubblewrap/cli
+bubblewrap init --manifest https://你的域名/manifest.webmanifest
+bubblewrap build          # 生成 app-release-signed.apk
+```

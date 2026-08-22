@@ -226,7 +226,7 @@ class Scraper:
             "free proxy nodes subscription",
             "v2ray free nodes aggregate",
         ]
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "NodePool"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "Sanl"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         found, seen = [], set()

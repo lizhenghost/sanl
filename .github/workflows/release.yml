@@ -32,10 +32,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: NodePool ${{ github.ref_name }}
+          name: Sanl ${{ github.ref_name }}
           body_path: CHANGELOG.md
           files: |
-            dist/nodepool-*.tar.gz
-            dist/nodepool-*.zip
+            dist/sanl-*.tar.gz
+            dist/sanl-*.zip
           draft: false
           prerelease: false

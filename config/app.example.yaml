@@ -1,6 +1,6 @@
-# NodePool 示例配置 — 复制为 config/app.yaml 后按需修改
+# Sanl 示例配置 — 复制为 config/app.yaml 后按需修改
 app:
-  name: "NodePool"
+  name: "Sanl"
   version: "2.3.0"
   debug: false            # 生产环境建议 false
   host: "0.0.0.0"

@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢关注 NodePool！欢迎以任何形式贡献。
+感谢关注 Sanl！欢迎以任何形式贡献。
 
 ## 开发环境
 
@@ -34,7 +34,7 @@ static/          单文件前端（零构建，直接改 HTML）
 
 ## 报告问题
 
-Issue 请附：Python 版本、`/api/nodes/stats` 输出、相关日志（`docker logs nodepool` 或终端输出）。
+Issue 请附：Python 版本、`/api/nodes/stats` 输出、相关日志（`docker logs sanl` 或终端输出）。
 
 ## 行为准则
 

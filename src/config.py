@@ -18,7 +18,7 @@ def load_config(path=None):
             _config = yaml.safe_load(f)
     else:
         _config = {
-            "app": {"name": "NodePool", "version": "1.0.0", "debug": True, "host": "0.0.0.0", "port": 8899, "api_key": "changeme"},
+            "app": {"name": "Sanl", "version": "1.0.0", "debug": True, "host": "0.0.0.0", "port": 8899, "api_key": "changeme"},
             "database": {"path": "./data/nodes.db"},
             "subs_check": {"binary_path": "./subs-check", "config_path": "./config/subs-check.yaml", "output_dir": "./output"},
             "sources": {"github": {"enabled": True, "refresh_interval": 3600}, "telegram": {"enabled": True, "refresh_interval": 7200}},

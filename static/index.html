@@ -2,8 +2,24 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NodePool - 节点池聚合平台</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Sanl - 节点池聚合平台</title>
+    <!-- PWA：安卓 Chrome/Edge 可「安装应用」到桌面，全屏独立运行 -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="icon" type="image/png" href="/static/icons/favicon.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sanl">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () =>
+                navigator.serviceWorker.register('/sw.js').catch(err =>
+                    console.warn('SW register failed:', err)));
+        }
+    </script>
     <script src="/vendor/echarts.min.js?v=5.4.3"></script>
     <script src="/vendor/qrcode.min.js?v=1.0.0" defer></script>
     <style>
@@ -148,7 +164,7 @@
 <body>
     <div class="container">
         <aside class="sidebar">
-            <div class="logo" style="justify-content:space-between;">🌐 NodePool <span style="display:flex;gap:6px;align-items:center;">
+            <div class="logo" style="justify-content:space-between;">🌐 Sanl <span style="display:flex;gap:6px;align-items:center;">
                 <button class="btn btn-sm btn-secondary" id="lang-btn" onclick="toggleLang()" title="Language" style="padding:4px 8px;font-size:12px;">EN</button>
                 <button class="btn btn-sm btn-secondary" id="theme-btn" onclick="toggleTheme()" title="主题" style="padding:4px 8px;font-size:13px;">🌙</button>
               </span></div>
@@ -1260,6 +1276,13 @@
         }
 
         // ===== 测速任务 =====
+        const CHECK_MODES = [
+            { id:'latency', icon:'🚀', name:'仅延迟', desc:'只测连通性和延迟，跳过速度/流媒体/IP识别 · 最快' },
+            { id:'speed',   icon:'⚡', name:'延迟+速度', desc:'测延迟和下载速度，跳过流媒体检测 · 推荐' },
+            { id:'full',    icon:'🔬', name:'全量检测', desc:'延迟+速度+流媒体解锁+IP风险 · 最慢最全' },
+        ];
+        let ckMode = 'speed';
+
         function renderCheck(main) {
             main.innerHTML = `
                 <div class="page-header"><h1 class="page-title">⚡ 测速任务</h1>
@@ -1267,6 +1290,29 @@
                         <button class="btn btn-secondary" id="ck-btn-bg" onclick="runCheck('scheduled')">🌙 后台测速</button>
                         <button class="btn btn-primary" id="ck-btn-fg" onclick="runCheck('manual')">⚡ 前台测速</button>
                     </div>
+                </div>
+                <div class="chart-container" style="margin-bottom:16px;">
+                    <h3 style="margin-bottom:12px;">🎛️ 测速维度（可单选）</h3>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;" id="ck-modes">
+                        ${CHECK_MODES.map(m => `
+                            <div class="ck-mode-card" data-mode="${m.id}" onclick="pickMode('${m.id}')"
+                                style="cursor:pointer;border:2px solid var(--border);border-radius:12px;padding:12px 14px;transition:all .15s;">
+                                <div style="font-weight:700;font-size:14px;">${m.icon} ${m.name}</div>
+                                <div class="text-muted" style="font-size:11.5px;margin-top:4px;line-height:1.5;">${m.desc}</div>
+                            </div>`).join('')}
+                    </div>
+                    <details style="margin-top:12px;">
+                        <summary class="text-muted" style="font-size:13px;cursor:pointer;user-select:none;">⚙️ 高级参数覆盖（可选，留空用默认值）</summary>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:10px;">
+                            <label style="font-size:12px;">测活并发<input class="form-input" id="ov-concurrent" type="number" min="1" max="500" placeholder="默认 120"></label>
+                            <label style="font-size:12px;">延迟超时 ms<input class="form-input" id="ov-timeout" type="number" min="500" max="10000" step="500" placeholder="默认 2000"></label>
+                            <label style="font-size:12px;">最低速度 KB/s<input class="form-input" id="ov-min-speed" type="number" min="0" placeholder="按模式"></label>
+                            <label style="font-size:12px;">下载数据 MB<input class="form-input" id="ov-download-mb" type="number" min="1" placeholder="按模式"></label>
+                            <label style="font-size:12px;">下载限时 s<input class="form-input" id="ov-download-timeout" type="number" min="1" max="30" placeholder="按模式"></label>
+                            <label style="font-size:12px;">测速并发<input class="form-input" id="ov-speed-concurrent" type="number" min="1" max="200" placeholder="默认 40"></label>
+                        </div>
+                        <p class="text-muted" style="font-size:11px;margin-top:6px;">⚠️ 测速并发×节点速度 不要超过出口总带宽，否则结果偏低。参数仅对本次任务生效。</p>
+                    </details>
                 </div>
                 <div class="chart-container" style="margin-bottom:16px;">
                     <h3 style="margin-bottom:12px;">🎯 合格判定</h3>
@@ -1286,6 +1332,7 @@
             loadThreshold();
             loadCheckHistory();
             pollCheckProgress();   // 启动进度轮询
+            pickMode(ckMode);      // 恢复上次选择的测速模式
         }
 
         async function loadThreshold() {
@@ -1331,6 +1378,8 @@
             const srcBadge = d.source === 'manual'
                 ? '<span class="badge badge-info">🧑‍💻 前台 · 手动触发</span>'
                 : '<span class="badge badge-secondary">⏰ 后台 · 定时调度</span>';
+            const MODE_NAMES = { latency:'🚀 仅延迟', speed:'⚡ 延迟+速度', full:'🔬 全量' };
+            const modeBadge = d.mode ? `<span class="badge badge-info">${MODE_NAMES[d.mode] || escHtml(d.mode)}</span>` : '';
             const stBadge = running
                 ? '<span class="badge badge-warning"><span class="loading" style="width:12px;height:12px;border-width:2px;"></span> 运行中</span>'
                 : d.status === 'completed' ? '<span class="badge badge-success">✅ 已完成</span>'
@@ -1366,7 +1415,7 @@
             box.innerHTML = `
                 <div class="chart-container">
                     <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:16px;">
-                        <div class="flex">${srcBadge}${stBadge}<span class="badge badge-secondary">⏱ ${dur}</span>${d.traffic?`<span class="badge badge-secondary">📶 流量 ${escHtml(d.traffic)}</span>`:''}</div>
+                        <div class="flex">${srcBadge}${modeBadge}${stBadge}<span class="badge badge-secondary">⏱ ${dur}</span>${d.traffic?`<span class="badge badge-secondary">📶 流量 ${escHtml(d.traffic)}</span>`:''}</div>
                         <span class="text-muted" style="font-size:12px;">任务 #${d.job_id ?? '--'}${d.error_message?` · <span style="color:var(--danger)">${escHtml(String(d.error_message).slice(0,60))}</span>`:''}</span>
                     </div>
                     <div style="display:flex;gap:6px;margin-bottom:14px;">${steps}</div>
@@ -1404,14 +1453,38 @@
             } catch(e) { console.error(e); showToast('测速记录加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
+        function pickMode(id) {
+            ckMode = id;
+            document.querySelectorAll('.ck-mode-card').forEach(c => {
+                const on = c.dataset.mode === id;
+                c.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
+                c.style.background = on ? 'color-mix(in srgb, var(--primary) 8%, transparent)' : 'transparent';
+                c.style.boxShadow = on ? '0 0 0 1px var(--primary)' : 'none';
+            });
+        }
+
         async function runCheck(trigger = 'manual') {
             const label = trigger === 'manual' ? '前台' : '后台';
+            // 收集高级参数覆盖（留空不传）
+            const ov = {};
+            const map = {'ov-concurrent':'concurrent','ov-timeout':'timeout','ov-min-speed':'min-speed',
+                         'ov-download-mb':'download-mb','ov-download-timeout':'download-timeout',
+                         'ov-speed-concurrent':'speed-concurrent'};
+            for (const [elId, key] of Object.entries(map)) {
+                const el = document.getElementById(elId);
+                if (el && el.value !== '' && el.value != null) ov[key] = isNaN(Number(el.value)) ? el.value : Number(el.value);
+            }
             try {
-                const r = await (await fetch(`${API}/check/run?trigger=${trigger}`, {method:'POST'})).json();
+                const qs = new URLSearchParams({ trigger, mode: ckMode });
+                const body = Object.keys(ov).length ? JSON.stringify(ov) : undefined;
+                const r = await (await fetch(`${API}/check/run?${qs}`, {
+                    method:'POST', body,
+                    headers: body ? {'Content-Type':'application/json'} : {}
+                })).json();
                 if (r.status === 'already_running') {
                     showToast(`已有${r.source==='manual'?'前台':'后台'}测速正在运行（任务 #${r.job_id}）`, 'error');
                 } else {
-                    showToast(`${label}测速已启动，正在跟踪实时进度…`);
+                    showToast(`${label}测速已启动（${CHECK_MODES.find(m=>m.id===ckMode)?.name || ckMode}），正在跟踪实时进度…`);
                     setTimeout(() => { if (currentPage === 'check') pollCheckProgress(); }, 1200);
                 }
             } catch(e) { showToast('启动失败: '+e.message, 'error'); }
@@ -1686,7 +1759,7 @@
             const blob = new Blob([c], {type:'text/plain;charset=utf-8'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `nodepool_convert_${Date.now()}.${ext}`;
+            a.download = `sanl_convert_${Date.now()}.${ext}`;
             a.click(); URL.revokeObjectURL(a.href);
         }
 
@@ -1850,7 +1923,7 @@
                   dashboard:'仪表盘', nodes:'节点列表', map:'世界地图', sources:'节点源',
                   subscribe_out:'订阅输出', tokens:'令牌管理', check:'测速任务',
                   cfendpoints:'优选端点', cfscan:'网段扫描', convert:'订阅转换' },
-            en: { overview:'Overview', pool:'Node Pool', cf:'CF Preferred', tools:'Tools',
+            en: { overview:'Overview', pool:'Sanl', cf:'CF Preferred', tools:'Tools',
                   dashboard:'Dashboard', nodes:'Nodes', map:'World Map', sources:'Sources',
                   subscribe_out:'Subscribe', tokens:'Tokens', check:'Speed Test',
                   cfendpoints:'Endpoints', cfscan:'Subnet Scan', convert:'Convert' }

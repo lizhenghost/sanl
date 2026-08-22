@@ -32,6 +32,41 @@ _RE_ANSI = re.compile(r'\x1b\[[0-9;]*m')
 # 阶段定义（前端步骤条）
 PHASES = ["拉取订阅", "解析去重", "连通性测活", "入库完成"]
 
+# 测速模式：控制测试维度（subs-check 无独立测速开关，通过参数组合实现）
+#   latency — 仅测活+延迟：跳过流媒体检测/IP重命名/速度测试(download压到1s)
+#   speed   — 延迟+下载速度：跳过流媒体检测（默认，性价比最高）
+#   full    — 全部维度：延迟+速度+流媒体解锁+IP风险
+CHECK_MODES = {
+    "latency": {
+        "label": "仅延迟",
+        "media-check": False,
+        "rename-node": False,       # IP 地理查询是耗时项，仅延迟模式直接跳过
+        "download-timeout": 1,
+        "download-mb": 1,
+        "min-speed": 0,
+    },
+    "speed": {
+        "label": "延迟+速度",
+        "media-check": False,
+        "rename-node": True,
+        "download-timeout": 6,
+        "download-mb": 1,
+        "min-speed": 256,
+    },
+    "full": {
+        "label": "全量(含流媒体)",
+        "media-check": True,
+        "rename-node": True,
+        "download-timeout": 6,
+        "download-mb": 1,
+        "min-speed": 256,
+    },
+}
+# 允许通过 API 覆盖的 subs-check 参数白名单
+OVERRIDABLE_KEYS = {"concurrent", "timeout", "min-speed", "download-mb",
+                    "download-timeout", "speed-concurrent", "speed-test-url",
+                    "alive-test-url", "media-concurrent"}
+
 
 async def _safe_wait(task) -> None:
     """等待日志泵任务结束（吞异常，最多等 10s）"""
@@ -53,10 +88,11 @@ class Checker:
         self.current_job: Optional[Dict] = None
 
     # ---------- 进度跟踪 ----------
-    def _job_init(self, job_id: int, trigger: str):
+    def _job_init(self, job_id: int, trigger: str, mode: str = "speed"):
         self.current_job = {
             "job_id": job_id,
             "source": "manual" if trigger == "manual" else "scheduled",  # manual=前台 scheduled=后台
+            "mode": mode if mode in CHECK_MODES else "speed",
             "started_at": time.time(),
             "finished_at": None,
             "status": "running",
@@ -128,6 +164,7 @@ class Checker:
         elapsed = (job["finished_at"] or time.time()) - job["started_at"]
         return {
             "job_id": job["job_id"], "source": job["source"],
+            "mode": job.get("mode", "speed"),
             "status": job["status"], "phase_idx": job["phase_idx"],
             "phases": PHASES, "elapsed": round(elapsed),
             "subs_total": job["subs_total"], "nodes_found": job["nodes_found"],
@@ -156,16 +193,20 @@ class Checker:
             logger.debug(f"log pump ended: {e}")
 
 
-    async def run_check(self, trigger: str = "manual") -> Dict:
+    async def run_check(self, trigger: str = "manual", mode: str = "speed",
+                        overrides: Optional[Dict] = None) -> Dict:
         """运行一次完整的测速检查
-        trigger: manual=前台(用户手动触发) / scheduled=后台(定时调度)"""
+        trigger: manual=前台(用户手动触发) / scheduled=后台(定时调度)
+        mode: latency=仅延迟 / speed=延迟+速度 / full=全量(含流媒体)
+        overrides: 覆盖 subs-check 参数（仅白名单键生效）"""
+        mode = mode if mode in CHECK_MODES else "speed"
         job_id = repository.add_check_job("full_check")
-        self._job_init(getattr(job_id, "id", job_id), trigger)
+        self._job_init(getattr(job_id, "id", job_id), trigger, mode)
         job = self.current_job
 
         from ..utils.taskmgr import task_manager
         TASK_ID = "check"
-        task_manager.start(TASK_ID, "⚡ 全量测速")
+        task_manager.start(TASK_ID, f"⚡ {CHECK_MODES[mode]['label']}测速")
         try:
             sources = repository.list_sources(enabled_only=True)
             if not sources:
@@ -175,8 +216,8 @@ class Checker:
                 return {"status": "no_sources", "job_id": job_id}
 
             task_manager.update(TASK_ID, phase="running",
-                                detail=f"准备 {len(sources)} 个源订阅")
-            await self._update_subs_check_config(sources)
+                                detail=f"准备 {len(sources)} 个源订阅（{CHECK_MODES[mode]['label']}）")
+            await self._update_subs_check_config(sources, mode=mode, overrides=overrides)
 
             import time as _t
             job_start_ts = int(_t.time())
@@ -225,8 +266,10 @@ class Checker:
             job.update({"status": "failed", "finished_at": time.time(), "error": str(e)})
             return {"status": "error", "job_id": job_id, "error": str(e)}
 
-    async def _update_subs_check_config(self, sources: List):
-        """动态更新 subs-check 配置文件中的订阅源（保留其他设置）"""
+    async def _update_subs_check_config(self, sources: List, mode: str = "speed",
+                                        overrides: Optional[Dict] = None):
+        """动态更新 subs-check 配置文件中的订阅源（保留其他设置）
+        mode: 测速维度模式（latency/speed/full）；overrides: 参数覆盖（白名单）"""
         import yaml
 
         with open(self.config_path, 'r') as f:
@@ -250,13 +293,24 @@ class Checker:
             remote_urls.append(f"http://127.0.0.1:{local_port}/sub/internal/manual")
             logger.info(f"Including {manual_count} manual nodes via internal endpoint")
         config['sub-urls'] = remote_urls
-        # 流媒体解锁检测（大纲 附录B check-streaming）：subs-check media-check 开关
-        config['media-check'] = True
+
+        # 按模式应用测试维度参数，再叠加用户覆盖项（白名单校验）
+        for k, v in CHECK_MODES.get(mode, CHECK_MODES["speed"]).items():
+            if k != "label":
+                config[k] = v
+        for k, v in (overrides or {}).items():
+            if k in OVERRIDABLE_KEYS:
+                config[k] = v
+            else:
+                logger.warning(f"Ignored non-overridable key: {k}")
+
+        logger.info(f"Updated subs-check config: {len(remote_urls)} sources, "
+                    f"mode={mode} ({CHECK_MODES.get(mode, {}).get('label')}), "
+                    f"media-check={config.get('media-check')}, "
+                    f"concurrent={config.get('concurrent')}")
 
         with open(self.config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-
-        logger.info(f"Updated subs-check config with {len(remote_urls)} remote sources")
 
     def _kill_stale_processes(self):
         """清理上一轮残留的 subs-check 孤儿进程（后端重启会遗留进程占用 API 端口）"""
@@ -287,7 +341,7 @@ class Checker:
             # 启动 subs-check（独立进程组，便于整组清理）；stdout/stderr 走管道逐行解析实时进度
             logfile = "/tmp/subs-check.log"
             with open(logfile, "a") as f:
-                f.write(f"\n===== NodePool 任务启动 ({self.current_job['source']}) "
+                f.write(f"\n===== Sanl 任务启动 ({self.current_job['source']}) "
                         f"{time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
             process = await asyncio.create_subprocess_exec(
                 self.binary_path,
@@ -301,7 +355,9 @@ class Checker:
 
             max_wait = 5400  # 90 分钟
             waited = 0
-            poll_interval = 5
+            poll_interval = 3
+            stable_ticks = 0      # 结果文件连续无增长的检测轮数
+            last_size = -1
 
             while waited < max_wait:
                 await asyncio.sleep(poll_interval)
@@ -313,11 +369,15 @@ class Checker:
                 # 只认本轮启动之后新写入的结果文件（mtime > start_ts）
                 if (os.path.exists(result_file) and os.path.getsize(result_file) > 0
                         and os.path.getmtime(result_file) > start_ts):
-                    # 等 60 秒确保写入完成
-                    await asyncio.sleep(60)
-                    self._terminate(process)
-                    await _safe_wait(pump)
-                    return await self._read_results()
+                    # 动态等写入完成：文件大小连续 5 轮(约15s)不再增长即视为写完
+                    # （替代旧版固定 sleep(60)，平均可省 40~55 秒）
+                    size = os.path.getsize(result_file)
+                    stable_ticks = stable_ticks + 1 if size == last_size else 0
+                    last_size = size
+                    if stable_ticks >= 5:
+                        self._terminate(process)
+                        await _safe_wait(pump)
+                        return await self._read_results()
 
             self._terminate(process)
             await _safe_wait(pump)

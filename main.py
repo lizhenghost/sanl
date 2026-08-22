@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NodePool 主入口
+Sanl 主入口
 """
 import sys
 import os
@@ -25,7 +25,7 @@ def main():
     host = config.get("host", "0.0.0.0")
     port = config.get("port", 8899)
     
-    logger.info(f"Starting NodePool on {host}:{port}")
+    logger.info(f"Starting Sanl on {host}:{port}")
     
     app = create_app()
     

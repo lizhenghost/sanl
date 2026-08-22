@@ -14,3 +14,5 @@ subs-check
 subs-check-*
 logs/
 *_TODO.md
+*.db-shm
+*.db-wal

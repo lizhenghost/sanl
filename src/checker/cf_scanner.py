@@ -82,7 +82,7 @@ async def get_official_ranges(ip_type: int = 4) -> List[str]:
 
 def _http_get_sync(url: str, timeout: int = 10) -> str:
     import urllib.request
-    req = urllib.request.Request(url, headers={"User-Agent": "NodePool/2.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Sanl/2.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "ignore")
 
@@ -157,7 +157,7 @@ async def _fetch_via_ip(ip: str, port: int, is_tls: bool, host_header: str,
                 ctx.verify_mode = ssl.CERT_NONE
                 sock = ctx.wrap_socket(sock, server_hostname=host_header)
             req = (f"GET {path} HTTP/1.1\r\nHost: {host_header}\r\n"
-                   f"User-Agent: NodePool/2.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")
+                   f"User-Agent: Sanl/2.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")
             sock.sendall(req.encode())
             buf, total = b"", 0
             t_dl = time.time()

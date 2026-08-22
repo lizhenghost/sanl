@@ -1,4 +1,4 @@
-"""订阅转换模块 —— NodePool 第二大功能块
+"""订阅转换模块 —— Sanl 第二大功能块
 
 把任意订阅链接 / 节点链接 / Base64 / Clash YAML / sing-box JSON
 转换为目标格式（clash / singbox / surge / loon / qx / v2ray / base64 / mixed / txt）。
@@ -28,7 +28,7 @@ CONCURRENCY = 8
 MAX_INPUT_URLS = 20
 
 # 模拟常见客户端 UA，机场订阅会按 UA 下发对应格式（都能被 parse_content 吃）
-FETCH_UA = ("clash.meta/v1.18.1 (NodePool converter; like v2rayN/6.45)")
+FETCH_UA = ("clash.meta/v1.18.1 (Sanl converter; like v2rayN/6.45)")
 
 URL_RE = re.compile(r"^https?://", re.I)
 
@@ -163,7 +163,7 @@ def _filter_nodes(items: List[Tuple[str, dict, str]], include: str,
 
 @router.post("/convert", response_model=ConvertResponse)
 async def convert_subscription(req: ConvertRequest):
-    """订阅转换：任意输入 → 目标格式（NodePool 第二大模块）"""
+    """订阅转换：任意输入 → 目标格式（Sanl 第二大模块）"""
     errors: List[str] = []
     if not req.input.strip():
         return ConvertResponse(ok=False, target=req.target, errors=["输入为空"])

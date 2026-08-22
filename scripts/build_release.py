@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NodePool 发布构建脚本
+Sanl 发布构建脚本
 打包项目为可分发的 tar.gz/zip 包
 """
 import os
@@ -54,7 +54,7 @@ def create_tar_gz(files, output_path):
     with tarfile.open(output_path, "w:gz") as tar:
         for f in files:
             arcname = os.path.relpath(f, PROJECT_ROOT)
-            tar.add(f, arcname=os.path.join(f"nodepool-{VERSION}", arcname))
+            tar.add(f, arcname=os.path.join(f"sanl-{VERSION}", arcname))
     print(f"Created: {output_path}")
 
 
@@ -64,7 +64,7 @@ def create_zip(files, output_path):
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in files:
             arcname = os.path.relpath(f, PROJECT_ROOT)
-            zf.write(f, arcname=os.path.join(f"nodepool-{VERSION}", arcname))
+            zf.write(f, arcname=os.path.join(f"sanl-{VERSION}", arcname))
     print(f"Created: {output_path}")
 
 
@@ -73,7 +73,7 @@ def create_changelog():
     changelog_path = os.path.join(PROJECT_ROOT, "CHANGELOG.md")
     if not os.path.exists(changelog_path):
         with open(changelog_path, "w") as f:
-            f.write(f"""# NodePool Changelog
+            f.write(f"""# Sanl Changelog
 
 ## v{VERSION} - {datetime.now().strftime("%Y-%m-%d")}
 
@@ -111,11 +111,11 @@ def main():
     print(f"Packaging {len(files)} files...")
 
     # 创建 tar.gz
-    tar_path = os.path.join(DIST_DIR, f"nodepool-{VERSION}.tar.gz")
+    tar_path = os.path.join(DIST_DIR, f"sanl-{VERSION}.tar.gz")
     create_tar_gz(files, tar_path)
 
     # 创建 zip
-    zip_path = os.path.join(DIST_DIR, f"nodepool-{VERSION}.zip")
+    zip_path = os.path.join(DIST_DIR, f"sanl-{VERSION}.zip")
     create_zip(files, zip_path)
 
     print(f"\n✅ Release {VERSION} built successfully!")

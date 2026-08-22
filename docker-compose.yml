@@ -1,7 +1,7 @@
 services:
-  nodepool:
+  sanl:
     build: .
-    container_name: nodepool
+    container_name: sanl
     restart: unless-stopped
     ports:
       - "8899:8899"
@@ -30,12 +30,12 @@ services:
   # 可选：反向代理 + 自动 HTTPS（Caddy 无需手动证书）
   # caddy:
   #   image: caddy:2-alpine
-  #   container_name: nodepool-caddy
+  #   container_name: sanl-caddy
   #   restart: unless-stopped
   #   ports: ["80:80", "443:443"]
   #   volumes:
   #     - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
   #     - caddy_data:/data
-  #   depends_on: [nodepool]
+  #   depends_on: [sanl]
   # volumes:
   #   caddy_data:
