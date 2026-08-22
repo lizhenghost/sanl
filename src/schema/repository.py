@@ -58,7 +58,7 @@ def _migrate(conn):
     """)
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_fingerprint ON nodes(fingerprint)")
 
-    # CF 优选端点表（ip/domain:port 列表，非代理节点，独立管理）
+    # CF 优选端点表（ip/domain:port 列表，非代理节点，独立管理；isp: telecom/mobile/unicom/all）
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cf_endpoints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,10 +67,48 @@ def _migrate(conn):
             remark TEXT,
             source_id INTEGER,
             last_seen_at INTEGER,
+            isp TEXT NOT NULL DEFAULT 'all',
             UNIQUE(host, port)
         )
     """)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(cf_endpoints)").fetchall()]
+    if cols and "isp" not in cols:
+        conn.execute("ALTER TABLE cf_endpoints ADD COLUMN isp TEXT NOT NULL DEFAULT 'all'")
+        _backfill_cf_isp(conn)
     conn.commit()
+
+
+def _backfill_cf_isp(conn):
+    """存量 CF 端点按 remark/来源补 isp 分类"""
+    import re as _re
+
+    def _detect(text: str) -> str:
+        t = (text or "").lower()
+        if any(k in t for k in ("cmcc", "移动")):
+            return "mobile"
+        if any(k in t for k in ("unicom", "联通")):
+            return "unicom"
+        if any(k in t for k in ("telecom", "电信")):
+            return "telecom"
+        return ""
+
+    rows = conn.execute("""
+        SELECT e.id, e.remark, COALESCE(s.url,'') AS url, COALESCE(s.name,'') AS name, e.isp
+        FROM cf_endpoints e LEFT JOIN sources s ON s.id = e.source_id
+        WHERE e.isp = 'all'
+    """).fetchall()
+    for r in rows:
+        isp = _detect(r["remark"]) or _detect(r["url"]) or _detect(r["name"])
+        # 来源 URL 的路径段精确匹配 ct/cu/cmcc（避免子串误判）
+        path = r["url"].lower()
+        if isp == "" and "/cmcc" in path:
+            isp = "mobile"
+        elif isp == "" and _re.search(r'/(cu)(\?|$|&)', path):
+            isp = "unicom"
+        elif isp == "" and _re.search(r'/(ct)(\?|$|&)', path):
+            isp = "telecom"
+        if isp:
+            conn.execute("UPDATE cf_endpoints SET isp = ? WHERE id = ?", (isp, r["id"]))
 
 
 # ===== 节点指纹 / 批量 Upsert =====
@@ -177,30 +215,48 @@ def apply_check_results(results: List[dict]) -> dict:
     return {"alive": alive, "marked_inactive": marked}
 
 
-def get_cf_endpoints(limit: int = 5000) -> list:
+def get_cf_endpoints(limit: int = 5000, isp: Optional[str] = None) -> list:
     with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT host, port, remark, source_id, last_seen_at FROM cf_endpoints ORDER BY id LIMIT ?",
-            (limit,)
-        ).fetchall()
+        if isp and isp != "any":
+            rows = conn.execute(
+                "SELECT host, port, remark, source_id, last_seen_at, isp FROM cf_endpoints "
+                "WHERE isp = ? ORDER BY id LIMIT ?", (isp, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT host, port, remark, source_id, last_seen_at, isp FROM cf_endpoints "
+                "ORDER BY id LIMIT ?", (limit,)
+            ).fetchall()
         return [dict(r) for r in rows]
 
 
-def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None) -> int:
-    """items: [{host, port, remark}]"""
+def cf_isp_stats() -> dict:
+    """按运营商分组统计"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT isp, COUNT(*) AS n FROM cf_endpoints GROUP BY isp"
+        ).fetchall()
+        return {r["isp"]: r["n"] for r in rows}
+
+
+def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,
+                        default_isp: str = "all") -> int:
+    """items: [{host, port, remark, isp?}]；行级 isp 优先，否则用来源级 default_isp"""
     now = int(__import__('time').time())
     n = 0
     with get_connection() as conn:
         for it in items:
+            isp = it.get("isp") or default_isp
             try:
                 conn.execute(
-                    """INSERT INTO cf_endpoints (host, port, remark, source_id, last_seen_at)
-                       VALUES (?, ?, ?, ?, ?)
+                    """INSERT INTO cf_endpoints (host, port, remark, source_id, last_seen_at, isp)
+                       VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT(host, port) DO UPDATE SET
                            remark = CASE WHEN excluded.remark != '' THEN excluded.remark ELSE cf_endpoints.remark END,
                            source_id = excluded.source_id,
-                           last_seen_at = excluded.last_seen_at""",
-                    (it["host"], int(it.get("port", 443)), it.get("remark", ""), source_id, now)
+                           last_seen_at = excluded.last_seen_at,
+                           isp = CASE WHEN excluded.isp != 'all' THEN excluded.isp ELSE cf_endpoints.isp END""",
+                    (it["host"], int(it.get("port", 443)), it.get("remark", ""), source_id, now, isp)
                 )
                 n += 1
             except Exception:

@@ -222,10 +222,31 @@ async def reimport_single_source(source_id: int):
 
 
 @api_router.get("/cf/endpoints")
-async def list_cf_endpoints(limit: int = Query(2000, le=20000)):
-    """CF 优选 IP/域名端点列表（host:port，独立于代理节点）"""
-    items = repository.get_cf_endpoints(limit=limit)
-    return {"total": repository.count_cf_endpoints(), "endpoints": items}
+async def list_cf_endpoints(
+    limit: int = Query(2000, le=20000),
+    isp: Optional[str] = Query(None, pattern="^(telecom|mobile|unicom|all|any)$",
+                               description="运营商筛选：telecom电信/mobile移动/unicom联通/all三网通用/any全部")
+):
+    """CF 优选 IP/域名端点列表（host:port，独立于代理节点），支持按运营商筛选"""
+    items = repository.get_cf_endpoints(limit=limit, isp=isp)
+    return {"total": repository.count_cf_endpoints(),
+            "by_isp": repository.cf_isp_stats(),
+            "endpoints": items}
+
+
+@api_router.get("/cf/endpoints/export")
+async def export_cf_endpoints(
+    isp: str = Query("any", pattern="^(telecom|mobile|unicom|all|any)$"),
+    limit: int = Query(5000, le=20000)
+):
+    """导出 CF 优选端点为 host:port#备注 文本（可直接粘进优选工具）"""
+    items = repository.get_cf_endpoints(limit=limit, isp=isp)
+    lines = [f"{it['host']}:{it['port']}#{it['remark'] or it['isp']}" for it in items]
+    return Response(
+        content="\n".join(lines),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache"}
+    )
 
 
 # ===== 节点接口 =====

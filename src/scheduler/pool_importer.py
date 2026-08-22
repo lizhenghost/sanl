@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 FETCH_CONCURRENCY = 4
 
 
+def detect_isp(*texts) -> str:
+    """从 URL/名称/备注推断运营商：telecom(电信)/mobile(移动)/unicom(联通)/all(三网通用)"""
+    import re
+    joined = " ".join(t for t in texts if t).lower()
+    if any(k in joined for k in ("cmcc", "移动")):
+        return "mobile"
+    if any(k in joined for k in ("unicom", "联通")) or re.search(r'(^|[^a-z])cu([^a-z]|$)', joined):
+        return "unicom"
+    if any(k in joined for k in ("telecom", "电信")) or re.search(r'(^|[^a-z])ct([^a-z]|$)', joined):
+        return "telecom"
+    return ""
+
+
 async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional[int] = None) -> dict:
     """
     执行全源导入。返回摘要 dict。
@@ -84,7 +97,11 @@ async def _import_one(sc: Scraper, src, summary: dict):
             summary["updated"] += res["updated"]
 
         if cf_eps:
-            n = repository.upsert_cf_endpoints(cf_eps, source_id=src.id)
+            src_isp = detect_isp(src.url, src.name) or "all"
+            for ep in cf_eps:
+                # 行级备注命中运营商优先（如「CF 电信优选」），否则用来源级（如 /cmcc 路径）
+                ep["isp"] = detect_isp(ep.get("remark", "")) or src_isp
+            n = repository.upsert_cf_endpoints(cf_eps, source_id=src.id, default_isp=src_isp)
             summary["cf_endpoints"] += n
 
         node_count = len(nodes)

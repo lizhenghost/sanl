@@ -471,6 +471,7 @@
                     <div class="flex">
                         <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
                         <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
+                        <button class="btn ${sourcesTab==='cf'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('cf')">🌐 CF优选</button>
                         <button class="btn btn-secondary" onclick="importAllSources(this)">🔄 全量导入</button>
                         <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
                     </div>
@@ -526,8 +527,66 @@
                         </div>
                     </div>
                 </div>
+                <div id="sources-tab-cf" style="${sourcesTab==='cf'?'':'display:none;'}">
+                    <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+                    <div class="chart-container">
+                        <div class="flex" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                            <h3 style="margin-right:auto;">🌐 CF 优选端点（按运营商）</h3>
+                            <select class="form-input" style="width:150px;" id="cf-isp-filter" onchange="renderCfTable()">
+                                <option value="any">全部来源</option>
+                                <option value="telecom">📶 电信优选</option>
+                                <option value="mobile">📶 移动优选</option>
+                                <option value="unicom">📶 联通优选</option>
+                                <option value="all">🌐 三网通用</option>
+                            </select>
+                            <button class="btn btn-secondary" onclick="copyCfEndpoints(this)">📋 复制当前</button>
+                            <a class="btn btn-secondary" id="cf-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
+                        </div>
+                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；每轮「全量导入」自动刷新</p>
+                        <div class="table-container" style="max-height:480px;overflow-y:auto;"><table><thead><tr>
+                            <th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
+                        </tr></thead><tbody id="cf-tbody"></tbody></table></div>
+                    </div>
+                </div>
             `;
-            loadSources();
+            if (sourcesTab === 'cf') { loadCfEndpoints(); } else { loadSources(); }
+        }
+
+        // ===== CF 优选 =====
+        let cfData = [];
+        function ispLabel(isp){ return ({telecom:'📶 电信',mobile:'📶 移动',unicom:'📶 联通',all:'🌐 三网'})[isp] || isp || 'all'; }
+        async function loadCfEndpoints(){
+            try{
+                const res = await fetch(`${API}/cf/endpoints?limit=20000`);
+                if(!res.ok) throw new Error(await res.text());
+                const d = await res.json();
+                cfData = d.endpoints||[];
+                const by = d.by_isp||{};
+                const cards = document.getElementById('cf-isp-cards');
+                if (cards) cards.innerHTML =
+                    ['telecom','mobile','unicom','all'].map(k=>`
+                      <div class="stat-card"><div class="stat-value">${by[k]||0}</div>
+                      <div class="stat-label">${ispLabel(k)}优选</div></div>`).join('');
+                renderCfTable();
+            }catch(e){ showToast('❌ CF优选加载失败: '+e.message,'error'); }
+        }
+        function renderCfTable(){
+            const tb = document.getElementById('cf-tbody'); if(!tb) return;
+            const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
+            const exp = document.getElementById('cf-export-btn');
+            if (exp) exp.href = `${API}/cf/endpoints/export?isp=${f}&limit=20000`;
+            const rows = cfData.filter(e=>f==='any'||e.isp===f);
+            tb.innerHTML = rows.slice(0,1000).map(e=>{
+                const t = e.last_seen_at ? new Date(e.last_seen_at*1000).toLocaleString() : '-';
+                return `<tr><td><code>${e.host}:${e.port}</code></td><td>${e.remark||''}</td><td>${ispLabel(e.isp)}</td><td class="text-muted">${t}</td></tr>`;
+            }).join('') || '<tr><td colspan="4" class="text-muted">暂无数据——先到源列表页点「🔄 全量导入」</td></tr>';
+        }
+        function copyCfEndpoints(btn){
+            const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
+            const lines = cfData.filter(e=>f==='any'||e.isp===f).map(e=>`${e.host}:${e.port}#${e.remark||e.isp}`);
+            navigator.clipboard.writeText(lines.join('\n')).then(()=>{
+                btn.textContent='✅ 已复制'; setTimeout(()=>btn.textContent='📋 复制当前',1500);
+            }).catch(()=>showToast('复制失败，请用导出 txt','error'));
         }
 
         let sourcesTab = 'list';
