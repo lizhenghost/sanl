@@ -48,8 +48,16 @@ def create_app() -> FastAPI:
         title=app_config.get("name", "NodePool"),
         version=app_config.get("version", "1.0.0"),
         description="免费节点池聚合平台",
-        lifespan=lifespan
+        lifespan=lifespan,
+        # 本地化 API 文档（默认 swagger-ui 引用 jsdelivr CDN，国内被墙白屏 → 自建零依赖 /docs 页）
+        docs_url=None,
+        redoc_url=None,
+        openapi_url="/openapi.json",
     )
+
+    # 挂载本地化 API 文档页
+    from .local_docs import register_local_docs
+    register_local_docs(app)
     
     # 挂载静态文件
     static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
@@ -1061,10 +1069,21 @@ async def raw_import_source(raw_data: RawImportSource):
 
 @api_router.get("/sources/health")
 async def get_sources_health():
-    """获取数据源健康度报告"""
+    """获取数据源健康度报告
+    状态语义（修复：原逻辑把 last_status==0 未抓取当健康必要条件，导致正常源全标红）：
+    - last_status=0 → pending 待抓取（新源尚未轮到调度，中性状态）
+    - last_status=1 且启用 → healthy 健康（最近一次抓取成功）
+    - 启用但 fail_count>=3 或禁用 → unhealthy 异常
+    """
     sources = repository.list_sources(enabled_only=False)
     health = []
     for s in sources:
+        if s.enabled == 1 and s.last_status == 1:
+            state = "healthy"
+        elif s.last_status == 0 and (s.fail_count or 0) < 3:
+            state = "pending"
+        else:
+            state = "unhealthy"
         health.append({
             "id": s.id,
             "name": s.name,
@@ -1073,9 +1092,28 @@ async def get_sources_health():
             "node_count": s.node_count,
             "last_status": s.last_status,
             "last_fetched_at": s.last_fetched_at,
-            "healthy": s.enabled == 1 and s.last_status == 0
+            "fail_count": s.fail_count,
+            "state": state,
+            "healthy": state == "healthy"
         })
     return health
+
+
+@api_router.post("/sources/fetch-all")
+async def fetch_all_sources_now(background: BackgroundTasks):
+    """立即触发全量源抓取（不等每6h定时；新导入的源马上验证可用性）"""
+    from ..scheduler.pool_importer import run_pool_import
+    from ..scraper.scraper import Scraper
+
+    async def _job():
+        sc = Scraper()
+        try:
+            summary = await run_pool_import(sc)
+            logger.info(f"Manual fetch-all done: {summary.get('sources_ok', 0)} ok / {summary.get('sources_failed', 0)} failed")
+        finally:
+            await sc.close()
+    background.add_task(_job)
+    return {"status": "ok", "message": "全量抓取已启动，稍后刷新查看各源节点数"}
 
 
 # ===== 源站 API 代理 =====

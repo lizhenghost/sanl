@@ -5,7 +5,7 @@ download-mb: 1
 download-timeout: 6
 filter: []
 listen-port: :8199
-media-check: false
+media-check: true
 media-concurrent: 10
 min-speed: 256
 node-prefix: ''
@@ -19,6 +19,16 @@ source:
 speed-concurrent: 40
 speed-test-url: http://cachefly.cachefly.net/10mb.test
 sub-urls:
+- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/config.yaml
+- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/README.md
+- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/sub/mix
+- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/config.yaml
+- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/README.md
+- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/clash.yaml
+- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/clash.yml
+- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/sub/mix
+- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/clash.yaml
+- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/clash.yml
 - https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt
 - https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt
 - https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt

@@ -245,13 +245,17 @@ class Scraper:
                     if not full or full.lower() in seen or stars < min_stars:
                         continue
                     seen.add(full.lower())
-                    # 猜测主分支上的常见订阅文件路径
-                    for fname in ("clash.yaml", "clash.yml", "sub/mix", "config.yaml", "README.md"):
-                        branch = repo.get("default_branch", "main")
+                    branch = repo.get("default_branch", "main")
+                    # 每仓库只保留最有希望的两个订阅文件路径（排除 README，避免重复源）
+                    repo_urls = [
+                        f"https://raw.githubusercontent.com/{full}/{branch}/clash.yaml",
+                        f"https://raw.githubusercontent.com/{full}/{branch}/sub/mix",
+                    ]
+                    for u in repo_urls:
                         found.append({
                             "repo": full,
                             "stars": stars,
-                            "url": f"https://raw.githubusercontent.com/{full}/{branch}/{fname}",
+                            "url": u,
                             "desc": (repo.get("description") or "")[:80],
                             "pushed_at": repo.get("pushed_at", ""),
                         })

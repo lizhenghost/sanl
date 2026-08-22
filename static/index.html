@@ -659,6 +659,7 @@
                         <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
                         <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
                         <button class="btn btn-secondary" onclick="importAllSources(this)">🔄 全量导入</button>
+                        <button class="btn btn-primary" onclick="fetchAllSources(this)">🚀 立即抓取全部</button>
                         <button class="btn btn-secondary" onclick="discoverSources(this)">🔭 发现新源</button>
                         <label class="btn btn-secondary" style="cursor:pointer;">📎 上传文件
                             <input type="file" id="imp-upload-file" accept=".txt,.yaml,.yml,.conf,.json,.list" style="display:none;" onchange="uploadImportFile(this)">
@@ -998,6 +999,15 @@
             if (page) renderSources(page);
         }
 
+        async function fetchAllSources(btn) {
+            btn.disabled = true; btn.textContent = '⏳ 抓取中…';
+            try {
+                await (await fetch(`${API}/sources/fetch-all`, { method: 'POST' })).json();
+                showToast('🚀 全量抓取已启动（后台执行，约1-3分钟），稍后点「刷新」查看各源节点数', 'success');
+                setTimeout(() => loadSources(), 90000);
+            } catch(e) { showToast('❌ ' + e.message, 'error'); }
+            btn.disabled = false; btn.textContent = '🚀 立即抓取全部';
+        }
         async function uploadImportFile(input) {
             const f = input.files && input.files[0];
             if (!f) return;
@@ -1133,12 +1143,16 @@
                 if (!sources.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">📭</div>暂无数据源，点击"预置源"一键导入</td></tr>'; return; }
                 tbody.innerHTML = sources.map(s => {
                     const h = health.find(h => h.id === s.id);
-                    const isHealthy = h ? h.healthy : s.enabled;
+                    const st = h ? (h.state || (h.healthy ? 'healthy' : 'unhealthy'))
+                                 : (s.last_status === 1 && s.enabled ? 'healthy' : (s.last_status === 0 ? 'pending' : 'unhealthy'));
+                    const badge = st === 'healthy' ? '<span class="badge badge-success">健康</span>'
+                                : st === 'pending' ? '<span class="badge badge-info">待抓取</span>'
+                                : `<span class="badge badge-danger">异常${(s.fail_count||0) >= 3 ? '×'+s.fail_count : ''}</span>`;
                     return `<tr><td>${s.name}</td>
                         <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${s.url}</td>
                         <td><span class="badge badge-info">${s.source_type}</span></td>
                         <td>${s.node_count||0}</td>
-                        <td><span class="badge ${isHealthy ? 'badge-success' : 'badge-danger'}">${isHealthy ? '健康' : '异常'}</span></td>
+                        <td>${badge}</td>
                         <td>
                             <button class="btn btn-sm ${s.enabled ? 'btn-secondary' : 'btn-primary'}" onclick="toggleSource(${s.id},${!s.enabled})">${s.enabled ? '禁用' : '启用'}</button>
                             <button class="btn btn-sm btn-danger" onclick="deleteSource(${s.id})">删除</button>
