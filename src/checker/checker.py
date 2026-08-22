@@ -241,6 +241,8 @@ class Checker:
             remote_urls.append(f"http://127.0.0.1:{local_port}/sub/internal/manual")
             logger.info(f"Including {manual_count} manual nodes via internal endpoint")
         config['sub-urls'] = remote_urls
+        # 流媒体解锁检测（大纲 附录B check-streaming）：subs-check media-check 开关
+        config['media-check'] = True
 
         with open(self.config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
@@ -427,6 +429,11 @@ class Checker:
 
             node_data = dict(proxy)  # clash 原字段即内部存储格式
             node_data.pop('name', None)
+            # 流媒体解锁标记（大纲 附录B check-streaming）：从 subs-check 节点名/字段提取
+            stream_flags = set()
+            for kw in ('Netflix', 'Disney', 'Hulu', 'HBO', 'YouTube', 'ChatGPT', 'TikTok', 'Prime'):
+                if kw.lower() in name.lower() or kw.lower() in json.dumps(node_data, ensure_ascii=False).lower():
+                    stream_flags.add(kw)
             results.append({
                 "node_type": ptype,
                 "node_data": node_data,
@@ -434,6 +441,7 @@ class Checker:
                 "download_speed": download_speed,
                 "latency": latency,
                 "country": country,
+                "stream_flags": "|".join(sorted(stream_flags)) or None,
             })
 
         from ..schema.repository import apply_check_results

@@ -1,0 +1,31 @@
+# NodePool 示例配置 — 复制为 config/app.yaml 后按需修改
+app:
+  name: "NodePool"
+  version: "2.3.0"
+  debug: false            # 生产环境建议 false
+  host: "0.0.0.0"
+  port: 8899
+  api_key: "CHANGE_ME_TO_RANDOM_SECRET"   # Web API 认证密钥，务必修改
+
+database:
+  path: "./data/nodes.db" # SQLite；Docker 卷挂载 data/ 即可持久化
+
+subs_check:
+  binary_path: "./subs-check"          # subs-check 二进制路径
+  config_path: "./config/subs-check.yaml"
+  output_dir: "./output"
+  listen_port: ":8199"
+
+sources:
+  github:
+    enabled: true
+    refresh_interval: 3600   # 秒
+  telegram:
+    enabled: true
+    refresh_interval: 7200
+
+scheduler:
+  fetch_cron: "0 */6 * * *"          # 每 6 小时抓取全部源
+  check_cron: "0 * * * *"            # 每小时整点自动测速
+  qualified_latency_ms: 200          # 节点合格延迟阈值(ms)，超过视为不合格
+  auto_clean_days: 7                 # 死节点自动清理天数

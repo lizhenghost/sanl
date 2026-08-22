@@ -27,6 +27,8 @@ def _migrate(conn):
     add_column("nodes", "fingerprint", "TEXT")
     add_column("nodes", "last_seen_at", "INTEGER")
     add_column("nodes", "favorite", "INTEGER NOT NULL DEFAULT 0")
+    add_column("tokens", "traffic_limit_mb", "REAL NOT NULL DEFAULT 0")  # 0=不限流（大纲 J.2 按流量限制）
+    add_column("nodes", "stream_flags", "TEXT")  # 流媒体解锁标记（大纲 附录B/H：Netflix/Disney 等）
 
     # 节点健康历史（近 N 天延迟/存活趋势，附录：优化 #4）
     conn.execute("""
@@ -206,20 +208,36 @@ def upsert_nodes_bulk(items: List[dict]) -> dict:
 
 
 def mark_missing_inactive(active_fps: set, include_manual: bool = False):
-    """把不在 active_fps 里的节点置为 inactive（默认只处理自动抓取节点，手动导入永不降级）"""
+    """把不在 active_fps 里的节点置为 inactive（默认只处理自动抓取节点，手动导入永不降级）
+
+    自动黑名单（大纲 H.3）：fail_count 连续累计，连续 3 轮未存活 → status='dead'
+    （dead 不再参与测速/订阅；节点重新被抓到时 fail_count 归零自动复活）
+    """
     if not active_fps:
         return 0
     fps = list(active_fps)[:20000]
     placeholders = ",".join("?" * len(fps))
     manual_filter = "" if include_manual else \
         " AND (source_id IS NULL OR source_id NOT IN (SELECT id FROM sources WHERE source_type = 'manual'))"
+    now = int(__import__('time').time())
     with get_connection() as conn:
         cur = conn.execute(
-            f"""UPDATE nodes SET status = 'inactive', updated_at = ?
+            f"""UPDATE nodes SET status = 'inactive',
+                   fail_count = CASE WHEN status = 'active' THEN fail_count + 1 ELSE fail_count END,
+                   updated_at = ?
                 WHERE status IN ('active') AND fingerprint NOT IN ({placeholders}){manual_filter}""",
-            [int(__import__('time').time())] + fps
+            [now] + fps
         )
         n = cur.rowcount
+        # 连续 3 轮失败 → 自动黑名单（dead）
+        dead = conn.execute(
+            f"""UPDATE nodes SET status = 'dead', updated_at = ?
+                WHERE status = 'inactive' AND fail_count >= 3{manual_filter}""",
+            (now,))
+        n_dead = dead.rowcount
+        if n_dead:
+            import logging
+            logging.getLogger(__name__).info(f"Auto-blacklist: {n_dead} nodes marked dead after 3 consecutive failures")
         conn.commit()
     return n
 
@@ -240,8 +258,8 @@ def apply_check_results(results: List[dict]) -> dict:
             conn.execute(
                 """INSERT INTO nodes (subscribe_url, source_id, node_name, node_type, node_data,
                                       status, fingerprint, download_speed, latency, country,
-                                      last_checked_at, last_seen_at)
-                   VALUES ('subs-check://alive', NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+                                      stream_flags, last_checked_at, last_seen_at)
+                   VALUES ('subs-check://alive', NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(fingerprint) DO UPDATE SET
                        status = 'active',
                        fail_count = 0,
@@ -249,10 +267,12 @@ def apply_check_results(results: List[dict]) -> dict:
                        download_speed = COALESCE(excluded.download_speed, nodes.download_speed),
                        latency = COALESCE(excluded.latency, nodes.latency),
                        country = COALESCE(excluded.country, nodes.country),
+                       stream_flags = COALESCE(excluded.stream_flags, nodes.stream_flags),
                        last_checked_at = excluded.last_checked_at,
                        last_seen_at = excluded.last_seen_at""",
                 (r.get("node_name", ""), r["node_type"], json.dumps(r["node_data"]), fp,
-                 r.get("download_speed"), r.get("latency"), r.get("country"), now, now)
+                 r.get("download_speed"), r.get("latency"), r.get("country"),
+                 r.get("stream_flags"), now, now)
             )
         conn.commit()
 
@@ -510,13 +530,19 @@ def get_node(node_id: int) -> Optional[Node]:
 def list_nodes(status: Optional[str] = None, country: Optional[str] = None, node_type: Optional[str] = None,
                limit: int = 100, min_score: Optional[float] = None, min_speed: Optional[float] = None,
                max_latency: Optional[int] = None, sort: str = "latency", order: str = "asc",
-               offset: int = 0, source_type: Optional[str] = None) -> List[Node]:
+               offset: int = 0, source_type: Optional[str] = None,
+               category: Optional[str] = None) -> List[Node]:
     with get_connection() as conn:
         query = "SELECT n.* FROM nodes n LEFT JOIN sources s ON n.source_id = s.id WHERE 1=1"
         params = []
+        if category:
+            query += " AND s.category = ?"
+            params.append(category)
         if status:
             query += " AND n.status = ?"
             params.append(status)
+        else:
+            query += " AND n.status != 'banned'"
         if country:
             query += " AND n.country = ?"
             params.append(country)
@@ -919,8 +945,8 @@ def update_node_scores() -> int:
 def get_ranking(limit: int = 50, country: Optional[str] = None,
                 node_type: Optional[str] = None, min_score: float = 0,
                 offset: int = 0, source_type: Optional[str] = None,
-                status: Optional[str] = None) -> List[Node]:
-    """获取节点排名（按评分降序）；source_type: manual/auto"""
+                status: Optional[str] = None, category: Optional[str] = None) -> List[Node]:
+    """获取节点排名（按评分降序）；source_type: manual/auto；默认排除 banned/dead"""
     with get_connection() as conn:
         query = ("SELECT n.* FROM nodes n LEFT JOIN sources s ON n.source_id = s.id "
                  "WHERE n.score >= ?")
@@ -934,6 +960,12 @@ def get_ranking(limit: int = 50, country: Optional[str] = None,
         if status:
             query += " AND n.status = ?"
             params.append(status)
+        else:
+            # 手动封禁与自动黑名单节点绝不进排名/订阅
+            query += " AND n.status NOT IN ('banned', 'dead')"
+        if category:
+            query += " AND s.category = ?"
+            params.append(category)
         if source_type:
             if source_type == "auto":
                 query += " AND COALESCE(s.source_type, '') != 'manual'"
@@ -965,6 +997,15 @@ def get_ranking_stats() -> dict:
         }
 
 # ===== 收藏夹 / 健康历史 / 访问统计（v2.3 优化）=====
+
+def set_node_banned(node_id: int, banned: bool) -> bool:
+    """手动封禁/解封（大纲 H.3）：banned 状态订阅与测速均排除"""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE nodes SET status = ?, updated_at = strftime('%s','now') WHERE id = ?",
+            ('banned' if banned else 'unknown', node_id))
+        return cur.rowcount > 0
+
 
 def count_nodes_by_source_type(source_type: str) -> int:
     """统计某来源类型的节点数"""
@@ -1027,6 +1068,32 @@ def log_sub_access(token_id, path: str, ua: str, bytes_out: int, node_count: int
         conn.execute(
             "INSERT INTO sub_access_log (token_id, ts, path, ua, bytes_out, node_count) VALUES (?,?,?,?,?,?)",
             (token_id, int(__import__('time').time()), path[:200], (ua or "")[:200], bytes_out, node_count))
+
+
+def check_token_traffic_quota(token_id) -> dict:
+    """Token 流量配额检查（大纲 J.2 按流量限制）：traffic_limit_mb=0 表示不限流"""
+    if not token_id:
+        return {"allowed": True}
+    with get_connection() as conn:
+        row = conn.execute("SELECT traffic_limit_mb FROM tokens WHERE id = ?", (token_id,)).fetchone()
+        if not row:
+            return {"allowed": True}
+        limit_mb = float(row["traffic_limit_mb"] or 0)
+        if limit_mb <= 0:
+            return {"allowed": True, "limit_mb": 0, "used_mb": 0}
+        used = conn.execute(
+            "SELECT COALESCE(SUM(bytes_out),0) FROM sub_access_log WHERE token_id = ?",
+            (token_id,)).fetchone()[0]
+        used_mb = used / (1024 * 1024)
+        return {"allowed": used_mb < limit_mb, "limit_mb": limit_mb, "used_mb": round(used_mb, 2)}
+
+
+def set_token_traffic_limit(token_id: int, limit_mb: float) -> bool:
+    """设置 Token 流量限额（MB），0=不限流"""
+    with get_connection() as conn:
+        cur = conn.execute("UPDATE tokens SET traffic_limit_mb = ? WHERE id = ?",
+                           (max(0.0, float(limit_mb)), token_id))
+        return cur.rowcount > 0
 
 
 def token_access_stats(limit: int = 50) -> list:

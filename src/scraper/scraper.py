@@ -151,6 +151,8 @@ class Scraper:
                     r = await self.fetch_static_file(url)
                 elif stype == "telegram":
                     r = await self.fetch_telegram_channel(url)
+                elif stype == "rss":
+                    r = await self.fetch_rss(url)
                 else:
                     r = FetchedSource(name=name, url=url, error=f"Unsupported type: {stype}")
 
@@ -189,12 +191,85 @@ class Scraper:
                     logger.warning(f"镜像失败 {m}: {me}")
             return None
 
+    async def fetch_rss(self, rss_url: str) -> Optional[FetchedSource]:
+        """RSS/博客源解析（大纲 4.1）：提取条目里的订阅链接"""
+        try:
+            resp = await self.client.get(rss_url, timeout=20.0)
+            resp.raise_for_status()
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(resp.content)
+            # RSS 2.0: <item><link>；Atom: <entry><link href>
+            links = []
+            for item in root.iter():
+                tag = item.tag.split('}')[-1]
+                if tag == 'link':
+                    href = item.get('href') or (item.text or '').strip()
+                    if href:
+                        links.append(href)
+                elif tag == 'guid' and item.text and item.text.startswith('http'):
+                    links.append(item.text.strip())
+            subs = [u for u in links if any(u.startswith(p) for p in SUB_PROTOCOLS)] or links
+            content = "\n".join(subs) if subs else ""
+            if not content:
+                return FetchedSource(name=rss_url, url=rss_url, error="RSS 无可用链接")
+            logger.info(f"RSS {rss_url}: extracted {len(subs)} candidate links")
+            return FetchedSource(name=rss_url.rstrip('/').split('/')[-1][:50], url=rss_url, raw_content=content)
+        except Exception as e:
+            logger.error(f"Failed to fetch RSS {rss_url}: {e}")
+            return FetchedSource(name=rss_url, url=rss_url, error=str(e))
+
+    async def discover_github_sources(self, min_stars: int = 100, per_page: int = 15,
+                                      token: str = "") -> list:
+        """GitHub 仓库自动发现（大纲 附录A#10/G.1）：搜索免费节点订阅仓库，返回候选列表"""
+        queries = [
+            "clash subscribe free nodes",
+            "free proxy nodes subscription",
+            "v2ray free nodes aggregate",
+        ]
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "NodePool"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        found, seen = [], set()
+        for q in queries:
+            try:
+                resp = await self.client.get(
+                    "https://api.github.com/search/repositories",
+                    params={"q": q, "sort": "stars", "order": "desc", "per_page": per_page},
+                    headers=headers, timeout=20.0)
+                if resp.status_code != 200:
+                    logger.warning(f"GitHub search '{q}' -> HTTP {resp.status_code}")
+                    continue
+                for repo in resp.json().get("items", []):
+                    full = repo.get("full_name", "")
+                    stars = repo.get("stargazers_count", 0)
+                    if not full or full.lower() in seen or stars < min_stars:
+                        continue
+                    seen.add(full.lower())
+                    # 猜测主分支上的常见订阅文件路径
+                    for fname in ("clash.yaml", "clash.yml", "sub/mix", "config.yaml", "README.md"):
+                        branch = repo.get("default_branch", "main")
+                        found.append({
+                            "repo": full,
+                            "stars": stars,
+                            "url": f"https://raw.githubusercontent.com/{full}/{branch}/{fname}",
+                            "desc": (repo.get("description") or "")[:80],
+                            "pushed_at": repo.get("pushed_at", ""),
+                        })
+            except Exception as e:
+                logger.warning(f"GitHub search failed for '{q}': {e}")
+        logger.info(f"GitHub discovery: {len(found)} candidate files from {len(seen)} repos")
+        return found
+
     async def fetch_source(self, url: str, source_type: str = "http") -> Optional[FetchedSource]:
         """按 URL/类型自动分发的统一抓取入口（池导入用）"""
         st = (source_type or "").lower()
         try:
             if url.startswith("data:"):
                 return await self.fetch_static_file(url)
+            if st == "telegram" or "t.me/" in url:
+                return await self.fetch_telegram_channel(url)
+            if st == "rss" or url.endswith((".xml", "/rss", "/feed", "/atom")):
+                return await self.fetch_rss(url)
             if st == "telegram" or "t.me/" in url:
                 return await self.fetch_telegram_channel(url)
             if "github.com" in url or "raw.githubusercontent.com" in url or st == "github":

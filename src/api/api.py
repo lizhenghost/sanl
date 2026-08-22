@@ -4,7 +4,7 @@ FastAPI 主应用
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.routing import APIRouter
@@ -191,6 +191,83 @@ async def import_single_node(form: SingleNodeForm):
         status="active"
     )
     return {"status": "ok", "name": name, "type": ntype}
+
+
+@api_router.post("/nodes/import/upload")
+async def import_nodes_upload(file: UploadFile = File(...), label: str = Query("文件上传")):
+    """本地文件上传导入（大纲 4.1 社区提交）：txt/yaml/conf/json 均可，自动识别格式"""
+    from .importer import parse_content
+    from ..schema.repository import node_fingerprint, get_connection
+    if file.size and file.size > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件超过 5MB 上限")
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1", errors="ignore")
+    result = parse_content(content)
+    if not result["nodes"]:
+        raise HTTPException(status_code=400, detail="；".join(result["errors"]) or "文件中无可识别的节点")
+
+    safe_label = (label or "文件上传")[:50]
+    src = repository.get_or_create_manual_source(f"上传:{file.filename or safe_label}")
+    imported, skipped = 0, 0
+    for ntype, data, name in result["nodes"]:
+        try:
+            fp = node_fingerprint(ntype, data)
+            with get_connection() as conn:
+                exists = conn.execute("SELECT 1 FROM nodes WHERE fingerprint = ?", (fp,)).fetchone()
+            if exists:
+                skipped += 1
+                continue
+            repository.add_node(
+                subscribe_url=f"manual://upload-{src.id}", source_id=src.id,
+                node_name=name, node_type=ntype, node_data=data, status="active")
+            imported += 1
+        except Exception as e:
+            result["errors"].append(f"{name}: {e}")
+    return {"imported": imported, "skipped": skipped, "errors": result["errors"][:10],
+            "total_parsed": len(result["nodes"])}
+
+
+@api_router.post("/nodes/{node_id}/ban")
+async def ban_node(node_id: int):
+    """手动封禁节点（大纲 H.3）：标记 banned，订阅与测速均排除"""
+    ok = repository.set_node_banned(node_id, True)
+    if not ok:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return {"status": "ok", "id": node_id, "banned": True}
+
+
+@api_router.post("/nodes/{node_id}/unban")
+async def unban_node(node_id: int):
+    """解除封禁：恢复为 unknown（等待下一轮测速重判）"""
+    ok = repository.set_node_banned(node_id, False)
+    if not ok:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return {"status": "ok", "id": node_id, "banned": False}
+
+
+@api_router.post("/sources/discover")
+async def discover_sources(min_stars: int = Query(100, ge=0), per_page: int = Query(15, ge=1, le=50),
+                           auto_add: bool = Query(False, description="自动入库新发现的源")):
+    """GitHub 仓库自动发现（大纲 附录A#10/G.1）：搜索免费节点订阅仓库并给出候选订阅文件"""
+    from ..scraper.scraper import Scraper
+    sc = Scraper()
+    try:
+        candidates = await sc.discover_github_sources(min_stars=min_stars, per_page=per_page)
+    finally:
+        await sc.close()
+    # 排除已存在的源 URL
+    existing = {s.url for s in repository.list_sources()}
+    new_items = [c for c in candidates if c["url"] not in existing]
+    added = 0
+    if auto_add:
+        for c in new_items[:10]:
+            if repository.add_source(name=f"[discover] {c['repo']}", url=c["url"], source_type="github"):
+                added += 1
+    return {"candidates": len(candidates), "new": len(new_items),
+            "added": added, "items": new_items[:30]}
 
 
 # ===== 全源池导入 / CF 优选端点 =====
@@ -406,22 +483,23 @@ async def get_subscribe(
     country: Optional[str] = Query(None),
     src: Optional[str] = Query(None, pattern="^(manual|auto)$", description="来源筛选"),
     proto: Optional[str] = Query(None, description="协议过滤：ss/vmess/vless/trojan/hysteria2/tuic/..."),
-    status: str = Query("active", pattern="^(active|all|unknown)$", description="导出范围：active=仅可用，all=全池")
+    status: str = Query("active", pattern="^(active|all|unknown)$", description="导出范围：active=仅可用，all=全池"),
+    category: Optional[str] = Query(None, description="订阅分类：free/airport/premium/cf（大纲 4.3）")
 ):
-    """获取多格式订阅链接（10 种格式 × 协议/状态/速度/延迟多维筛选）"""
+    """获取多格式订阅链接（10 种格式 × 协议/状态/速度/延迟/分类多维筛选）"""
     from .subscribe import generate_by_format, EXPORT_CONTENT_TYPES
 
     if status == "all":
         # 全池导出（含 unknown/inactive），按评分降序、未测节点殿后
         nodes = repository.list_nodes(
             limit=limit, country=country, node_type=proto,
-            sort="score", order="desc", source_type=src
+            sort="score", order="desc", source_type=src, category=category
         )
     else:
         # 活跃节点按评分降序
         nodes = repository.get_ranking(
             limit=limit, country=country, min_score=min_score,
-            node_type=proto, source_type=src
+            node_type=proto, source_type=src, category=category
         )
 
     # 内存过滤 min_speed / max_latency
@@ -440,6 +518,23 @@ async def get_subscribe(
         media_type=EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
         headers={"Cache-Control": "no-cache"}
     )
+
+
+@api_router.post("/token/{token_id}/traffic-limit")
+async def set_token_limit(token_id: int, limit_mb: float = Query(0, ge=0, le=1024*1024,
+                          description="流量限额 MB，0=不限流（大纲 J.2）")):
+    """设置 Token 流量限额；订阅访问累计超限时该 token 返回 429"""
+    ok = repository.set_token_traffic_limit(token_id, limit_mb)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Token 不存在")
+    quota = repository.check_token_traffic_quota(token_id)
+    return {"status": "ok", "id": token_id, "limit_mb": limit_mb, **quota}
+
+
+@api_router.get("/token/{token_id}/quota")
+async def get_token_quota(token_id: int):
+    """查询 Token 当前流量用量与配额"""
+    return {"status": "ok", **repository.check_token_traffic_quota(token_id)}
 
 
 # ===== 排名接口 =====
@@ -505,7 +600,8 @@ async def subscribe_by_token(
     country: Optional[str] = Query(None),
     src: Optional[str] = Query(None, pattern="^(manual|auto)$"),
     proto: Optional[str] = Query(None, description="协议过滤"),
-    status: str = Query("active", pattern="^(active|all|unknown)$")
+    status: str = Query("active", pattern="^(active|all|unknown)$"),
+    category: Optional[str] = Query(None, description="订阅分类：free/airport/premium/cf（按来源 category 过滤，大纲 4.3）")
 ):
     """Token 鉴权订阅输出：/sub/{token}/{clash|clash-meta|singbox|v2ray|base64|txt|mixed|surge|loon|qx}"""
     from .subscribe import generate_by_format, EXPORT_CONTENT_TYPES
@@ -515,15 +611,21 @@ async def subscribe_by_token(
     if not info:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    # 流量限额检查（大纲 J.2 按流量限制）：超限返回 429
+    quota = repository.check_token_traffic_quota(info.get("id"))
+    if not quota.get("allowed", True):
+        raise HTTPException(status_code=429,
+                            detail=f"Token 流量配额已用尽 ({quota['used_mb']:.1f}/{quota['limit_mb']:.0f} MB)")
+
     if status == "all":
         nodes = repository.list_nodes(
             limit=limit, country=country, node_type=proto,
-            sort="score", order="desc", source_type=src
+            sort="score", order="desc", source_type=src, category=category
         )
     else:
         nodes = repository.get_ranking(
             limit=limit, country=country, min_score=min_score,
-            node_type=proto, source_type=src
+            node_type=proto, source_type=src, category=category
         )
     if min_speed is not None:
         nodes = [n for n in nodes if (n.download_speed or 0) >= min_speed * 1024]

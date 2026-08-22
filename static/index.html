@@ -162,6 +162,8 @@
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
                 <div class="nav-item" data-page="check">⚡ 测速任务</div>
+                <div class="nav-group">📖 文档</div>
+                <a class="nav-item" href="/docs" target="_blank" style="text-decoration:none;color:inherit;">📚 API 文档</a>
                 <div class="nav-group">🛰 CF 优选</div>
                 <div class="nav-item" data-page="cfendpoints">🌐 优选端点</div>
                 <div class="nav-item" data-page="cfscan">🔍 网段扫描</div>
@@ -493,6 +495,13 @@
             showToast(`✅ 已导出 ${rows.length} 个节点 (${fmt.toUpperCase()})`);
         }
 
+        async function banNode(id, ban) {
+            try {
+                const r = await (await fetch(`${API}/nodes/${id}/${ban ? 'ban' : 'unban'}`, { method: 'POST' })).json();
+                if (r.status === 'ok') { showToast(ban ? '🚫 已封禁' : '♻️ 已解封（下轮测速重判）', 'success'); loadNodes(); }
+                else showToast('操作失败', 'error');
+            } catch(e) { showToast('❌ ' + e.message, 'error'); }
+        }
         function renderNodeTable(nodes) {
             const tbody = document.getElementById('nodes-tbody');
             const thead = document.getElementById('nodes-thead-row');
@@ -500,7 +509,7 @@
             const cols = [
                 ['star','',''], ['name','名称'], ['type','协议'], ['country','国家'],
                 ['latency','延迟'], ['speed','速度'], ['score','评分'], ['grade','等级'], ['status','状态'],
-                ['trend','📈','']
+                ['trend','📈',''], ['ban','🚫','']
             ].filter(c => !colVis.includes(c[0]));
             if (thead) thead.innerHTML = cols.map(c => `<th>${c[1]}</th>`).join('');
             if (!nodes.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>`; return; }
@@ -520,8 +529,11 @@
                     speed: `<td>${speed}</td>`,
                     score: `<td style="color:${scoreColor};">${score.toFixed(1)}</td>`,
                     grade: `<td>${grade}</td>`,
-                    status: `<td><span class="badge ${statusClass}">${n.status}</span></td>`,
-                    trend: `<td style="cursor:pointer;" onclick="showTrend(${n.id},'${safeName}')" title="近7天趋势">📈</td>`
+                    status: `<td><span class="badge ${statusClass}">${n.status==='banned'?'🚫 '+n.status:n.status}</span></td>`,
+                    trend: `<td style="cursor:pointer;" onclick="showTrend(${n.id},'${safeName}')" title="近7天趋势">📈</td>`,
+                    ban: `<td style="cursor:pointer;white-space:nowrap;" title="${n.status==='banned'?'解封':'封禁'}">${n.status==='banned'
+                        ? `<button class="btn btn-secondary btn-sm" onclick="banNode(${n.id},false)">♻️ 解封</button>`
+                        : `<button class="btn btn-secondary btn-sm" onclick="banNode(${n.id},true)">🚫 封禁</button>`}</td>`
                 };
                 return '<tr>' + cols.map(c => cells[c[0]]).join('') + '</tr>';
             }).join('');
@@ -604,6 +616,19 @@
                         itemStyle: { color: '#2563eb', opacity: 0.75 },
                         encode: { value: 2 },
                         label: worldOk ? {} : { show: true, formatter: p => p.name, position: 'right', color: '#475569', fontSize: 10 }
+                    },
+                    // 热门地区波纹动画（大纲 附录 I.2 effectScatter）：节点数 TOP 5
+                    {
+                        type: 'effectScatter', coordinateSystem: worldOk ? 'geo' : 'cartesian2d',
+                        data: (() => {
+                            const top5 = [...scatterData].sort((a,b) => (b.value?b.value[2]:b.count) - (a.value?a.value[2]:a.count)).slice(0, 5);
+                            return top5.map(d => ({name: d.name, value: [d.value[0]||d.lng, d.value[1]||d.lat, d.value[2]||d.count]}));
+                        })(),
+                        symbolSize: v => Math.max(10, Math.min(34, v[2] * 3.4)),
+                        rippleEffect: { brushType: 'stroke', scale: 3.2 },
+                        itemStyle: { color: '#f59e0b', shadowBlur: 12, shadowColor: 'rgba(245,158,11,.6)' },
+                        encode: { value: 2 },
+                        label: { show: true, formatter: p => `🔥 ${p.name}`, position: 'right', color: '#d97706', fontSize: 11, fontWeight: 600 }
                     }]
                 };
                 if (worldOk) {
@@ -634,6 +659,10 @@
                         <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
                         <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
                         <button class="btn btn-secondary" onclick="importAllSources(this)">🔄 全量导入</button>
+                        <button class="btn btn-secondary" onclick="discoverSources(this)">🔭 发现新源</button>
+                        <label class="btn btn-secondary" style="cursor:pointer;">📎 上传文件
+                            <input type="file" id="imp-upload-file" accept=".txt,.yaml,.yml,.conf,.json,.list" style="display:none;" onchange="uploadImportFile(this)">
+                        </label>
                         <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
                     </div>
                 </div>
@@ -969,6 +998,36 @@
             if (page) renderSources(page);
         }
 
+        async function uploadImportFile(input) {
+            const f = input.files && input.files[0];
+            if (!f) return;
+            const fd = new FormData();
+            fd.append('file', f);
+            const label = document.getElementById('imp-batch-label');
+            const q = label && label.value.trim() ? '&label=' + encodeURIComponent(label.value.trim()) : '';
+            showToast('⏳ 正在解析并导入 ' + f.name + ' …');
+            try {
+                const r = await (await fetch(`${API}/nodes/import/upload?${q.slice(1)}`, { method:'POST', body: fd })).json();
+                if (r.imported != null) showToast(`✅ 文件导入成功：新增 ${r.imported} 个，重复跳过 ${r.skipped} 个`, 'success');
+                else showToast('❌ 导入失败', 'error');
+                loadSources();
+            } catch(e) { showToast('❌ 上传失败: ' + e.message, 'error'); }
+            input.value = '';
+        }
+        async function discoverSources(btn) {
+            btn.disabled = true; btn.textContent = '🔭 搜索中…';
+            try {
+                const r = await (await fetch(`${API}/sources/discover?min_stars=100&per_page=15`, { method:'POST' })).json();
+                const lines = (r.items || []).slice(0, 10).map(i => `${i.repo} ⭐${i.stars}`);
+                if ((r.new || 0) === 0) { showToast('未发现新的候选源（现有源已覆盖）'); }
+                else if (confirm(`发现 ${r.candidates} 个候选 / ${r.new} 个新源，前 10 个：\n\n${lines.join('\n')}\n\n是否自动入库前 10 个新源？`)) {
+                    const r2 = await (await fetch(`${API}/sources/discover?auto_add=true`, { method:'POST' })).json();
+                    showToast(`✅ 已入库 ${r2.added} 个新源`, 'success');
+                    loadSources();
+                }
+            } catch(e) { showToast('❌ 发现失败: ' + e.message, 'error'); }
+            btn.disabled = false; btn.textContent = '🔭 发现新源';
+        }
         async function importAllSources(btn) {
             if (btn) { btn.disabled = true; btn.textContent = '⏳ 导入中…'; }
             try {
@@ -1367,6 +1426,13 @@
                             <option value="loon">Loon</option>
                             <option value="qx">Quantumult X</option>
                         </select>
+                        <select class="form-input" style="width:130px;" id="agg-category" onchange="genAggLink()" title="订阅分类（按来源分类过滤）">
+                            <option value="">全部来源</option>
+                            <option value="free">🆓 免费源</option>
+                            <option value="manual">🛠 手动导入</option>
+                            <option value="airport">✈️ 机场订阅</option>
+                            <option value="premium">💎 优选</option>
+                        </select>
                         <button class="btn btn-secondary" onclick="copyAggLink()">📋 复制</button>
                         <span id="agg-count" class="text-muted" style="font-size:13px;"></span>
                     </div>
@@ -1432,7 +1498,8 @@
                                 <code style="color:#2563eb;">/surge</code> ·
                                 <code style="color:#2563eb;">/loon</code> ·
                                 <code style="color:#2563eb;">/qx</code><br>
-                                筛选参数：<code>?min_speed=10&max_latency=300&limit=100</code>
+                                筛选参数：<code>?min_speed=10&max_latency=300&limit=100</code><br>
+                                分类过滤：<code>?category=free|manual|airport|premium</code>（大纲 4.3 订阅分类）
                             </p>
                         </div>
                     </div>
@@ -1443,7 +1510,8 @@
         let lastSubLink = '';
         async function genAggLink() {
             const fmt = document.getElementById('agg-fmt').value;
-            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=5000`;
+            const cat = document.getElementById('agg-category') ? document.getElementById('agg-category').value : '';
+            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&limit=5000` + (cat ? `&category=${cat}` : '');
             const el = document.getElementById('agg-link');
             el.textContent = link; el.style.display = 'block';
             window._aggLink = link;
@@ -1687,6 +1755,7 @@
                         <td>${t.last_used_at ? new Date(t.last_used_at*1000).toLocaleString() : '从未'}</td>
                         <td>
                             <button class="btn btn-sm ${t.is_active ? 'btn-secondary' : 'btn-primary'}" onclick="toggleToken(${t.id},${!t.is_active})">${t.is_active ? '禁用' : '启用'}</button>
+                            <button class="btn btn-sm btn-secondary" onclick="showQuotaModal(${t.id},'${t.name}')" title="流量限额（大纲 J.2）">📊 限额</button>
                             <button class="btn btn-sm btn-danger" onclick="deleteToken(${t.id})">删除</button>
                         </td></tr>
                 `).join('');
@@ -1723,6 +1792,29 @@
                     </div>
                 `;
             } catch(e) { showToast('创建失败', 'error'); }
+        }
+
+        async function showQuotaModal(id, name) {
+            let used = 0, limit = 0;
+            try {
+                const q = await (await fetch(`${API}/token/${id}/quota`)).json();
+                used = q.used_mb || 0; limit = q.limit_mb || 0;
+            } catch(e) {}
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-content').innerHTML = `
+                <div class="modal-header"><h2 class="modal-title">📊 流量限额 — ${name}</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+                <p class="text-muted mb-4">已用 <b>${used.toFixed(1)} MB</b>${limit > 0 ? ` / 配额 ${limit} MB` : ''}（按订阅输出累计流量计）</p>
+                <div class="form-group"><label class="form-label">月度限额 MB（0 = 不限流，超限后该 Token 订阅返回 429）</label>
+                    <input class="form-input" id="tk-quota-mb" type="number" min="0" step="100" value="${limit > 0 ? limit : 0}"></div>
+                <div class="flex" style="justify-content:flex-end;"><button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doSaveQuota(${id})">保存</button></div>
+            `;
+        }
+        async function doSaveQuota(id) {
+            const v = parseFloat(document.getElementById('tk-quota-mb').value) || 0;
+            try {
+                const r = await (await fetch(`${API}/token/${id}/traffic-limit?limit_mb=${v}`, { method: 'POST' })).json();
+                if (r.status === 'ok') { showToast(`✅ 限额已保存：${v > 0 ? v + ' MB' : '不限流'}`, 'success'); closeModal(); }
+            } catch(e) { showToast('❌ 保存失败', 'error'); }
         }
 
         async function toggleToken(id, active) {

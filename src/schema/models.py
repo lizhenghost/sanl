@@ -8,6 +8,8 @@ class NodeStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     CHECKING = "checking"
+    DEAD = "dead"          # 自动黑名单：连续3轮测速失败（大纲 H.3）
+    BANNED = "banned"      # 手动封禁（大纲 H.3）
 
 
 class SourceType(str, Enum):
@@ -28,6 +30,7 @@ class Source:
     last_status: int = 0
     node_count: int = 0
     fail_count: int = 0
+    stream_flags: Optional[str] = None
     category: str = "free"
     created_at: Optional[int] = None
     updated_at: Optional[int] = None
@@ -45,6 +48,7 @@ class Node:
     country: Optional[str] = None
     country_code: Optional[str] = None
     fail_count: int = 0
+    stream_flags: Optional[str] = None
     provider: Optional[str] = None
     latency: Optional[int] = None
     download_speed: Optional[int] = None
