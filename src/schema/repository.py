@@ -77,6 +77,16 @@ def _migrate(conn):
         _backfill_cf_isp(conn)
     if cols and "latency_ms" not in cols:
         conn.execute("ALTER TABLE cf_endpoints ADD COLUMN latency_ms INTEGER")
+    if cols and "ip_version" not in cols:
+        conn.execute("ALTER TABLE cf_endpoints ADD COLUMN ip_version INTEGER NOT NULL DEFAULT 0")
+        # 回填：host 含冒号→v6，点分数字→v4，否则域名0
+        conn.execute("""
+            UPDATE cf_endpoints SET ip_version = CASE
+                WHEN host LIKE '%:%' THEN 6
+                WHEN host GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*' THEN 4
+                ELSE 0 END
+            WHERE ip_version = 0
+        """)
     conn.commit()
 
 
@@ -218,22 +228,36 @@ def apply_check_results(results: List[dict]) -> dict:
 
 
 def get_cf_endpoints(limit: int = 5000, isp: Optional[str] = None,
-                     sort: str = "id", only_alive: bool = False) -> list:
-    order = {"latency": "latency_ms IS NULL, latency_ms ASC, id",
+                     sort: str = "id", only_alive: bool = False,
+                     ip_version: Optional[int] = None) -> list:
+    order = {"latency": "ip_version, latency_ms IS NULL, latency_ms ASC, id",
              "id": "id"}.get(sort, "id")
-    where, params = "", []
+    where, params = [], []
     if isp and isp != "any":
-        where += " WHERE isp = ?"
-        params.append(isp)
+        where.append("isp = ?"); params.append(isp)
+    if ip_version in (4, 6):
+        where.append("ip_version = ?"); params.append(ip_version)
+    elif ip_version == 0:
+        where.append("ip_version = 0")
     if only_alive:
-        where += (" AND" if where else " WHERE") + " latency_ms IS NOT NULL"
+        where.append("latency_ms IS NOT NULL")
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT host, port, remark, source_id, last_seen_at, isp, latency_ms "
-            f"FROM cf_endpoints{where} ORDER BY {order} LIMIT ?",
+            f"SELECT host, port, remark, source_id, last_seen_at, isp, latency_ms, ip_version "
+            f"FROM cf_endpoints{clause} ORDER BY {order} LIMIT ?",
             (*params, limit)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def cf_ip_version_stats() -> dict:
+    """按 IP 版本分组统计（4/6/域名）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT ip_version, COUNT(*) AS n FROM cf_endpoints GROUP BY ip_version"
+        ).fetchall()
+        return {r["ip_version"]: r["n"] for r in rows}
 
 
 def save_cf_latencies(results: List[dict]) -> int:
@@ -258,7 +282,7 @@ def cf_isp_stats() -> dict:
 
 def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,
                         default_isp: str = "all") -> int:
-    """items: [{host, port, remark, isp?}]；行级 isp 优先，否则用来源级 default_isp"""
+    """items: [{host, port, remark, isp?, ip_version?}]；行级 isp 优先，否则用来源级 default_isp"""
     now = int(__import__('time').time())
     n = 0
     with get_connection() as conn:
@@ -266,14 +290,15 @@ def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,
             isp = it.get("isp") or default_isp
             try:
                 conn.execute(
-                    """INSERT INTO cf_endpoints (host, port, remark, source_id, last_seen_at, isp)
-                       VALUES (?, ?, ?, ?, ?, ?)
+                    """INSERT INTO cf_endpoints (host, port, remark, source_id, last_seen_at, isp, ip_version)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(host, port) DO UPDATE SET
                            remark = CASE WHEN excluded.remark != '' THEN excluded.remark ELSE cf_endpoints.remark END,
                            source_id = excluded.source_id,
                            last_seen_at = excluded.last_seen_at,
                            isp = CASE WHEN excluded.isp != 'all' THEN excluded.isp ELSE cf_endpoints.isp END""",
-                    (it["host"], int(it.get("port", 443)), it.get("remark", ""), source_id, now, isp)
+                    (it["host"], int(it.get("port", 443)), it.get("remark", ""), source_id, now, isp,
+                     int(it.get("ip_version", 0)))
                 )
                 n += 1
             except Exception:

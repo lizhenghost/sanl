@@ -39,5 +39,5 @@ sources:
 
 scheduler:
   fetch_cron: "0 */6 * * *"   # 每6小时抓取
-  check_cron: "30 * * * *"     # 每小时30分测速
+  check_cron: "0 */4 * * *"    # 从每日零点起每4小时测速(0/4/8/12/16/20点)
   auto_clean_days: 7           # 自动清理7天前的数据

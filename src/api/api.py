@@ -226,13 +226,17 @@ async def list_cf_endpoints(
     limit: int = Query(2000, le=20000),
     isp: Optional[str] = Query(None, pattern="^(telecom|mobile|unicom|all|any)$",
                                description="运营商筛选：telecom电信/mobile移动/unicom联通/all三网通用/any全部"),
-    sort: str = Query("id", pattern="^(latency|id)$", description="latency=按TCP延迟升序"),
-    only_alive: bool = Query(False, description="仅返回延迟检测存活的端点")
+    sort: str = Query("id", pattern="^(latency|id)$", description="latency=按IP版本分组+TCP延迟升序"),
+    only_alive: bool = Query(False, description="仅返回延迟检测存活的端点"),
+    ip_version: Optional[int] = Query(None, ge=0, le=6,
+                                      description="IP版本筛选：4=IPv4 / 6=IPv6 / 0=域名 / 不传=全部")
 ):
-    """CF 优选 IP/域名端点列表（host:port，独立于代理节点），支持按运营商筛选与延迟排序"""
-    items = repository.get_cf_endpoints(limit=limit, isp=isp, sort=sort, only_alive=only_alive)
+    """CF 优选 IP/域名端点列表，支持运营商、IP版本筛选与延迟排序"""
+    items = repository.get_cf_endpoints(limit=limit, isp=isp, sort=sort,
+                                        only_alive=only_alive, ip_version=ip_version)
     return {"total": repository.count_cf_endpoints(),
             "by_isp": repository.cf_isp_stats(),
+            "by_ip_version": repository.cf_ip_version_stats(),
             "endpoints": items}
 
 

@@ -390,8 +390,38 @@ def parse_host_port(line: str) -> Tuple[str, dict, str]:
 _DOMAIN_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$', re.IGNORECASE)
 
 
+def _is_ipv6(host: str) -> bool:
+    """裸 IPv6 或 [方括号] 形式"""
+    import ipaddress
+    h = (host or "").strip().strip("[]")
+    if ":" not in h:
+        return False
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        return False
+
+
+def detect_ip_version(host: str) -> int:
+    """IP 版本：4=IPv4 / 6=IPv6 / 0=域名"""
+    import ipaddress
+    h = (host or "").strip().strip("[]")
+    if ":" in h:
+        try:
+            return ipaddress.ip_address(h).version
+        except ValueError:
+            return 0
+    try:
+        return ipaddress.ip_address(h).version
+    except ValueError:
+        return 0
+
+
 def _is_valid_endpoint_host(host: str) -> bool:
-    """CF 优选端点 host 必须是合法域名或 IPv4（拒绝 cf- 这类残片）"""
+    """CF 优选端点 host 必须是合法域名 / IPv4 / IPv6（拒绝 cf- 这类残片）"""
+    if _is_ipv6(host):
+        return True
     return bool(_is_ipv4(host) or _DOMAIN_RE.match(host))
 
 
@@ -570,11 +600,16 @@ def parse_content(content: str, cf_as_nodes: bool = True) -> dict:
         if low.startswith(("https://", "#", "//")):
             continue
 
-        # 2.3) 无协议前缀的 host:port#remark / host#remark（CF 优选格式）
+        # 2.3) 无协议前缀的 host:port#remark / host#remark（CF 优选格式，兼容 [IPv6]:port）
         try:
             _body = line.split("#", 1)[0].strip()
             _remark = line.split("#", 1)[1].strip() if "#" in line else ""
-            if ":" in _body:
+            if _body.startswith("[") and "]" in _body:
+                # [2606:4700::1111]:443 → host=2606:4700::1111
+                _host = _body[1:_body.index("]")].strip()
+                _rest = _body[_body.index("]") + 1:]
+                _port = int(_rest.lstrip(":")) if _rest.lstrip(":").isdigit() else 443
+            elif ":" in _body:
                 _host, _p = _body.rsplit(":", 1)
                 _port = int(_p) if _p.isdigit() else 443
             else:
@@ -583,7 +618,8 @@ def parse_content(content: str, cf_as_nodes: bool = True) -> dict:
                 if cf_as_nodes:
                     results.append(parse_host_port(line))
                 else:
-                    cf_list.append({"host": _host, "port": _port,
+                    cf_list.append({"host": _host.strip("[]"), "port": _port,
+                                    "ip_version": detect_ip_version(_host),
                                     "remark": _remark or f"优选-{_host}"})
             else:
                 raise ValueError("host/port 无效")

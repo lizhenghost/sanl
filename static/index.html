@@ -528,7 +528,7 @@
                     </div>
                 </div>
                 <div id="sources-tab-cf" style="${sourcesTab==='cf'?'':'display:none;'}">
-                    <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+                    <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));"></div>
                     <div class="chart-container">
                         <div class="flex" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
                             <h3 style="margin-right:auto;">🌐 CF 优选端点（按运营商）</h3>
@@ -538,6 +538,11 @@
                                 <option value="mobile">📶 移动优选</option>
                                 <option value="unicom">📶 联通优选</option>
                                 <option value="all">🌐 三网通用</option>
+                            </select>
+                            <select class="form-input" style="width:130px;" id="cf-ipver-filter" onchange="loadCfEndpoints()">
+                                <option value="">IPv4+IPv6</option>
+                                <option value="4">仅 IPv4</option>
+                                <option value="6">仅 IPv6</option>
                             </select>
                             <select class="form-input" style="width:130px;" id="cf-sort-filter" onchange="loadCfEndpoints()">
                                 <option value="latency">⚡ 延迟优先</option>
@@ -552,7 +557,7 @@
                         </div>
                         <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；延迟为 TCP 握手 RTT（本机视角），每轮「全量导入」自动刷新列表</p>
                         <div class="table-container" style="max-height:480px;overflow-y:auto;"><table><thead><tr>
-                            <th>延迟</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
+                            <th>延迟</th><th>版本</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
                         </tr></thead><tbody id="cf-tbody"></tbody></table></div>
                     </div>
                 </div>
@@ -567,16 +572,19 @@
             try{
                 const sort = (document.getElementById('cf-sort-filter')||{}).value || 'latency';
                 const alive = document.getElementById('cf-only-alive')?.checked ? '&only_alive=true' : '';
-                const res = await fetch(`${API}/cf/endpoints?limit=20000&sort=${sort}${alive}`);
+                const ipv = (document.getElementById('cf-ipver-filter')||{}).value || '';
+                const res = await fetch(`${API}/cf/endpoints?limit=20000&sort=${sort}${alive}${ipv?`&ip_version=${ipv}`:''}`);
                 if(!res.ok) throw new Error(await res.text());
                 const d = await res.json();
                 cfData = d.endpoints||[];
-                const by = d.by_isp||{};
+                const by = d.by_isp||{}, bv = d.by_ip_version||{};
                 const cards = document.getElementById('cf-isp-cards');
                 if (cards) cards.innerHTML =
                     ['telecom','mobile','unicom','all'].map(k=>`
                       <div class="stat-card"><div class="stat-value">${by[k]||0}</div>
-                      <div class="stat-label">${ispLabel(k)}优选</div></div>`).join('');
+                      <div class="stat-label">${ispLabel(k)}优选</div></div>`).join('')
+                    + `<div class="stat-card"><div class="stat-value">${bv[4]||0}</div><div class="stat-label">IPv4 端点</div></div>`
+                    + `<div class="stat-card"><div class="stat-value">${bv[6]||0}</div><div class="stat-label">IPv6 端点</div></div>`;
                 renderCfTable();
             }catch(e){ showToast('❌ CF优选加载失败: '+e.message,'error'); }
         }
@@ -584,6 +592,11 @@
             if (la == null) return '<span class="text-muted">—</span>';
             const cls = la < 100 ? 'badge-success' : la < 200 ? 'badge-warning' : 'badge-danger';
             return `<span class="badge ${cls}">${la}ms</span>`;
+        }
+        function cfVerBadge(v){
+            if (v === 4) return '<span class="badge badge-success">v4</span>';
+            if (v === 6) return '<span class="badge badge-warning">v6</span>';
+            return '<span class="badge badge-secondary">域名</span>';
         }
         async function pingCfEndpoints(btn){
             btn.disabled = true; btn.textContent = '⏳ 检测中…';
@@ -606,8 +619,8 @@
             const rows = cfData.filter(e=>f==='any'||e.isp===f);
             tb.innerHTML = rows.slice(0,1000).map(e=>{
                 const t = e.last_seen_at ? new Date(e.last_seen_at*1000).toLocaleString() : '-';
-                return `<tr><td>${cfLatencyBadge(e.latency_ms)}</td><td><code>${e.host}:${e.port}</code></td><td>${e.remark||''}</td><td>${ispLabel(e.isp)}</td><td class="text-muted">${t}</td></tr>`;
-            }).join('') || '<tr><td colspan="5" class="text-muted">暂无数据——先到源列表页点「🔄 全量导入」</td></tr>';
+                return `<tr><td>${cfLatencyBadge(e.latency_ms)}</td><td>${cfVerBadge(e.ip_version)}</td><td><code>${e.host}:${e.port}</code></td><td>${e.remark||''}</td><td>${ispLabel(e.isp)}</td><td class="text-muted">${t}</td></tr>`;
+            }).join('') || '<tr><td colspan="6" class="text-muted">暂无数据——先到源列表页点「🔄 全量导入」</td></tr>';
         }
         function copyCfEndpoints(btn){
             const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
