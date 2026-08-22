@@ -26,6 +26,8 @@
         .nav-item:hover { background: #eff6ff; color: var(--primary); }
         .nav-item.active { background: linear-gradient(135deg, var(--primary), var(--accent)); color: #fff; box-shadow: 0 4px 12px rgba(37,99,235,.30); }
         .sidebar-footer { margin-top: auto; padding-top: 20px; color: #94a3b8; font-size: 12px; }
+        .nav-group { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .8px; padding: 14px 16px 6px; font-weight: 700; }
+        .nav-group:first-child { padding-top: 2px; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: var(--surface); padding: 24px; border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); transition: transform .2s ease, box-shadow .2s ease; }
         .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
@@ -106,6 +108,7 @@
             .sidebar nav::-webkit-scrollbar { display: none; }
             .nav-item { white-space: nowrap; font-size: 13px; padding: 8px 10px; }
             .sidebar-footer { display: none; }
+            .nav-group { display: none; }
             .main { padding: 12px; }
             .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
             .stat-card { padding: 16px; }
@@ -129,12 +132,15 @@
         <aside class="sidebar">
             <div class="logo">🌐 NodePool <span>v2.0</span></div>
             <nav>
+                <div class="nav-group">🧩 节点池</div>
                 <div class="nav-item active" data-page="dashboard">📊 仪表盘</div>
                 <div class="nav-item" data-page="nodes">🔗 节点列表</div>
                 <div class="nav-item" data-page="map">🌍 世界地图</div>
                 <div class="nav-item" data-page="sources">📡 数据源</div>
                 <div class="nav-item" data-page="cfscan">🛰 CF扫描</div>
                 <div class="nav-item" data-page="check">⚡ 测速任务</div>
+                <div class="nav-group">🔄 订阅中心</div>
+                <div class="nav-item" data-page="convert">🔁 订阅转换</div>
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
             </nav>
@@ -184,6 +190,7 @@
                 case 'sources': renderSources(main); break;
                 case 'cfscan': renderCfScan(main); break;
                 case 'check': renderCheck(main); break;
+                case 'convert': renderConvert(main); break;
                 case 'subscribe': renderSubscribe(main); break;
                 case 'tokens': renderTokens(main); break;
             }
@@ -1198,6 +1205,146 @@
             try { document.execCommand('copy'); showToast('✅ 已复制'); } catch(e) { showToast('复制失败，请手动选择', 'error'); }
             document.body.removeChild(ta);
         }
+
+        // ===== 🔁 订阅转换（第二大功能块） =====
+        const CONVERT_FORMATS = [
+            {key:'clash', name:'Clash'},
+            {key:'clash-meta', name:'Clash.Meta'},
+            {key:'singbox', name:'Sing-box'},
+            {key:'v2ray', name:'V2Ray (明文链接)'},
+            {key:'base64', name:'Base64 订阅'},
+            {key:'mixed', name:'Mixed 混合链接'},
+            {key:'surge', name:'Surge'},
+            {key:'loon', name:'Loon'},
+            {key:'qx', name:'Quantumult X'},
+            {key:'txt', name:'TXT 明文'},
+        ];
+        let convertBusy = false;
+
+        function renderConvert(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🔁 订阅转换</h1>
+                    <button class="btn btn-secondary" onclick="renderConvert(document.getElementById('main-content'))">🔄 重置</button>
+                </div>
+                <div class="chart-container">
+                    <div style="font-weight:600;margin-bottom:6px;">📥 输入</div>
+                    <div class="text-muted" style="font-size:13px;margin-bottom:10px;">
+                        支持：订阅链接（每行一条，自动拉取）· 节点链接（ss/vmess/vless/trojan/hy2/tuic/ssr…）· 整段 Base64 · Clash YAML · sing-box JSON
+                    </div>
+                    <textarea id="cv-input" class="form-input" style="min-height:150px;" placeholder="https://example.com/sub&#10;https://another.com/clash&#10;或直接粘贴节点链接 / Base64 / Clash 配置…"></textarea>
+                    <div class="flex mt-4" style="align-items:flex-end;">
+                        <div style="flex:1;min-width:180px;">
+                            <label class="form-label">🎯 目标格式</label>
+                            <select id="cv-target" class="form-input">
+                                ${CONVERT_FORMATS.map(f => `<option value="${f.key}">${f.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="flex:1;min-width:160px;">
+                            <label class="form-label">🔍 包含关键词 <span class="text-muted" style="font-size:11px;">(可选,逗号分隔)</span></label>
+                            <input id="cv-include" class="form-input" placeholder="香港,日本,HK">
+                        </div>
+                        <div style="flex:1;min-width:160px;">
+                            <label class="form-label">🚫 排除关键词 <span class="text-muted" style="font-size:11px;">(可选)</span></label>
+                            <input id="cv-exclude" class="form-input" placeholder="官网,到期,流量">
+                        </div>
+                    </div>
+                    <label style="display:inline-flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cv-dedupe" checked style="width:16px;height:16px;accent-color:#2563eb;"> 按 服务器+端口 去重
+                    </label>
+                    <div class="flex mt-4">
+                        <button class="btn btn-primary" id="cv-go" onclick="doConvert()">🚀 开始转换</button>
+                        <span id="cv-status" class="text-muted" style="align-self:center;"></span>
+                    </div>
+                </div>
+                <div id="cv-result"></div>`;
+
+            // 恢复上次输入
+            try {
+                const saved = sessionStorage.getItem('cv_input');
+                if (saved) document.getElementById('cv-input').value = saved;
+            } catch(e) {}
+        }
+
+        async function doConvert() {
+            if (convertBusy) return;
+            const input = document.getElementById('cv-input').value.trim();
+            if (!input) return showToast('请先输入订阅链接或节点内容', 'error');
+            convertBusy = true;
+            try { sessionStorage.setItem('cv_input', input); } catch(e) {}
+
+            const body = {
+                input,
+                target: document.getElementById('cv-target').value,
+                include: document.getElementById('cv-include').value.trim(),
+                exclude: document.getElementById('cv-exclude').value.trim(),
+                dedupe: document.getElementById('cv-dedupe').checked,
+            };
+            const btn = document.getElementById('cv-go');
+            const st = document.getElementById('cv-status');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> 转换中…';
+            st.textContent = '正在拉取订阅并解析…';
+
+            try {
+                const r = await fetch(API + '/convert', { method:'POST',
+                    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+                const d = await r.json();
+                renderConvertResult(d);
+            } catch(e) {
+                showToast('转换请求失败: ' + e, 'error');
+                st.textContent = '';
+            } finally {
+                convertBusy = false;
+                btn.disabled = false;
+                btn.innerHTML = '🚀 开始转换';
+            }
+        }
+
+        function renderConvertResult(d) {
+            const box = document.getElementById('cv-result');
+            const st = document.getElementById('cv-status');
+            st.textContent = '';
+            if (!d.ok) {
+                box.innerHTML = `<div class="chart-container" style="border-color:#fecaca;">
+                    <div style="font-weight:600;color:var(--danger);margin-bottom:8px;">❌ 转换失败</div>
+                    ${(d.errors||[]).map(e=>`<div class="text-muted" style="font-size:13px;">• ${escHtml(e)}</div>`).join('') || '<div class="text-muted">未知错误</div>'}
+                </div>`;
+                return;
+            }
+            const fmtName = (CONVERT_FORMATS.find(f=>f.key===d.target)||{}).name || d.target;
+            window._cvContent = d.content;
+            box.innerHTML = `
+                <div class="chart-container">
+                    <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <div style="font-weight:600;">📤 转换结果 <span class="badge badge-info">${fmtName}</span></div>
+                        <div class="flex">
+                            <button class="btn btn-secondary btn-sm" onclick="copyText(window._cvContent)">📋 复制</button>
+                            <button class="btn btn-secondary btn-sm" onclick="downloadConvert()">⬇ 下载文件</button>
+                        </div>
+                    </div>
+                    <div class="flex mb-4">
+                        <span class="badge badge-success">📡 拉取订阅 ${d.fetched}</span>
+                        <span class="badge badge-warning">🧩 解析节点 ${d.parsed}</span>
+                        <span class="badge badge-info">✅ 导出 ${d.exported}</span>
+                        <span class="badge badge-secondary">${(d.content.length/1024).toFixed(1)} KB</span>
+                    </div>
+                    <textarea id="cv-output" class="form-input" readonly style="min-height:260px;font-family:monospace;font-size:12px;background:var(--surface-2);">${escHtml(d.content.slice(0, 200000))}${d.content.length>200000?'\n… (内容过长已截断显示，复制/下载仍为完整内容)':''}</textarea>
+                    ${(d.errors&&d.errors.length)?`<details style="margin-top:10px;"><summary class="text-muted" style="cursor:pointer;font-size:13px;">⚠️ ${d.errors.length} 条警告</summary>${d.errors.map(e=>`<div class="text-muted" style="font-size:12px;">• ${escHtml(e)}</div>`).join('')}</details>`:''}
+                </div>`;
+            showToast(`✅ 转换完成：导出 ${d.exported} 个节点`);
+        }
+
+        function downloadConvert() {
+            const c = window._cvContent || '';
+            const ext = ({clash:'yaml','clash-meta':'yaml',singbox:'json'})[document.getElementById('cv-target')?.value] || 'txt';
+            const blob = new Blob([c], {type:'text/plain;charset=utf-8'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `nodepool_convert_${Date.now()}.${ext}`;
+            a.click(); URL.revokeObjectURL(a.href);
+        }
+
+        function escHtml(t) { return String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function renderSubQRTo(containerId, text) {
             const container = document.getElementById(containerId);
             if (!container) return;

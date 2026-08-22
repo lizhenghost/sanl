@@ -53,8 +53,11 @@ def parse_ss(uri: str) -> Tuple[str, dict, str]:
         query = parse_qs(qs)
 
     if "@" not in body:
-        # legacy: 整段 base64(method:password@host:port)
+        # legacy: 整段 base64(method:password@host:port[#fragment]) —— fragment 可能被一起编码
         decoded = _b64decode(body).decode()
+        if "#" in decoded:
+            decoded, frag2 = decoded.split("#", 1)
+            frag = frag or frag2
         method, rest = decoded.split(":", 1)
         password, hostport = rest.rsplit("@", 1)
     else:
@@ -62,6 +65,8 @@ def parse_ss(uri: str) -> Tuple[str, dict, str]:
         if ":" not in unquote(userinfo):  # userinfo 是 base64(method:password)
             userinfo = _b64decode(userinfo).decode()
         method, password = userinfo.split(":", 1)
+
+    hostport = hostport.strip()  # 尾部换行/空白防御
 
     host, port = hostport.rsplit(":", 1)
     data = {

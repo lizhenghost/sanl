@@ -66,6 +66,8 @@ def create_app() -> FastAPI:
     
     # 包含路由
     app.include_router(api_router, prefix="/api")
+    from .converter import router as convert_router
+    app.include_router(convert_router, prefix="/api", tags=["converter"])
     app.include_router(sub_router, prefix="/sub", tags=["subscription"])
     
     return app
