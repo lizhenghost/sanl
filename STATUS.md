@@ -1,4 +1,10 @@
-# NodePool 运行态快照 — v2.3.0 (127d39e)
+# NodePool 运行态快照 — v2.3.1 (97af632, 已推GitHub)
+
+## 方案v2.1最终对照补全 (2026-08-22)
+对照初始大纲 node-pool-platform-proposal-v2.md 逐项 grep 实测,12项缺口落地:
+GitHub仓库自动发现/RSS解析/文件上传导入/订阅分类/自动黑名单(fail≥3→dead)/手动封禁/
+effectScatter热点/Token流量限额(429)/流媒体解锁media-check/API文档入口/config.example.yaml/NodeStatus枚举。
+如实预留: RBAC三级角色、WS实时进度。回归15/15+新功能8/8全过
 
 **更新**: 2026-08-22 | 后端 PID 见 pgrep -f main.py | http://127.0.0.1:8899
 
