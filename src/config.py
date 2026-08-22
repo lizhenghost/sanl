@@ -4,7 +4,7 @@
 import yaml
 import os
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "app.yaml")
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "app.yaml")
 _config = None
 
 

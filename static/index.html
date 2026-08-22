@@ -130,19 +130,22 @@
 <body>
     <div class="container">
         <aside class="sidebar">
-            <div class="logo">🌐 NodePool <span>v2.0</span></div>
+            <div class="logo">🌐 NodePool <span id="app-version">v2.2.0</span></div>
             <nav>
-                <div class="nav-group">🧩 节点池</div>
+                <div class="nav-group">📊 总览</div>
                 <div class="nav-item active" data-page="dashboard">📊 仪表盘</div>
+                <div class="nav-group">🧩 节点池</div>
                 <div class="nav-item" data-page="nodes">🔗 节点列表</div>
                 <div class="nav-item" data-page="map">🌍 世界地图</div>
-                <div class="nav-item" data-page="sources">📡 数据源</div>
-                <div class="nav-item" data-page="cfscan">🛰 CF扫描</div>
-                <div class="nav-item" data-page="check">⚡ 测速任务</div>
-                <div class="nav-group">🔄 订阅中心</div>
-                <div class="nav-item" data-page="convert">🔁 订阅转换</div>
+                <div class="nav-item" data-page="sources">📡 节点源</div>
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
+                <div class="nav-item" data-page="check">⚡ 测速任务</div>
+                <div class="nav-group">🛰 CF 优选</div>
+                <div class="nav-item" data-page="cfendpoints">🌐 优选端点</div>
+                <div class="nav-item" data-page="cfscan">🔍 网段扫描</div>
+                <div class="nav-group">🔁 转换工具</div>
+                <div class="nav-item" data-page="convert">🔄 订阅转换</div>
             </nav>
             <div class="sidebar-footer">
                 <div id="last-check">最近检查: --</div>
@@ -188,6 +191,7 @@
                 case 'nodes': renderNodes(main); break;
                 case 'map': renderMap(main); break;
                 case 'sources': renderSources(main); break;
+                case 'cfendpoints': renderCfEndpoints(main); break;
                 case 'cfscan': renderCfScan(main); break;
                 case 'check': renderCheck(main); break;
                 case 'convert': renderConvert(main); break;
@@ -503,7 +507,6 @@
                     <div class="flex">
                         <button class="btn ${sourcesTab==='list'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('list')">📋 源列表</button>
                         <button class="btn ${sourcesTab==='import'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('import')">⬇️ 手动导入</button>
-                        <button class="btn ${sourcesTab==='cf'?'btn-primary':'btn-secondary'}" onclick="switchSourcesTab('cf')">🌐 CF优选</button>
                         <button class="btn btn-secondary" onclick="importAllSources(this)">🔄 全量导入</button>
                         <button class="btn btn-secondary" onclick="loadSources()">🔄 刷新</button>
                     </div>
@@ -559,42 +562,50 @@
                         </div>
                     </div>
                 </div>
-                <div id="sources-tab-cf" style="${sourcesTab==='cf'?'':'display:none;'}">
-                    <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));"></div>
-                    <div class="chart-container">
-                        <div class="flex" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-                            <h3 style="margin-right:auto;">🌐 CF 优选端点（按运营商）</h3>
-                            <select class="form-input" style="width:150px;" id="cf-isp-filter" onchange="renderCfTable()">
-                                <option value="any">全部来源</option>
-                                <option value="telecom">📶 电信优选</option>
-                                <option value="mobile">📶 移动优选</option>
-                                <option value="unicom">📶 联通优选</option>
-                                <option value="all">🌐 三网通用</option>
-                            </select>
-                            <select class="form-input" style="width:130px;" id="cf-ipver-filter" onchange="loadCfEndpoints()">
-                                <option value="">IPv4+IPv6</option>
-                                <option value="4">仅 IPv4</option>
-                                <option value="6">仅 IPv6</option>
-                            </select>
-                            <select class="form-input" style="width:130px;" id="cf-sort-filter" onchange="loadCfEndpoints()">
-                                <option value="latency">⚡ 延迟优先</option>
-                                <option value="id">🕐 默认顺序</option>
-                            </select>
-                            <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:4px;">
-                                <input type="checkbox" id="cf-only-alive" onchange="loadCfEndpoints()">仅存活
-                            </label>
-                            <button class="btn btn-primary" id="cf-ping-btn" onclick="pingCfEndpoints(this)">⚡ 测延迟</button>
-                            <button class="btn btn-secondary" onclick="copyCfEndpoints(this)">📋 复制当前</button>
-                            <a class="btn btn-secondary" id="cf-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
-                        </div>
-                        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；延迟为 TCP 握手 RTT（本机视角），每轮「全量导入」自动刷新列表</p>
-                        <div class="table-container" style="max-height:480px;overflow-y:auto;"><table><thead><tr>
-                            <th>延迟</th><th>版本</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
-                        </tr></thead><tbody id="cf-tbody"></tbody></table></div>
-                    </div>
-                </div>
             `;
-            if (sourcesTab === 'cf') { loadCfEndpoints(); } else { loadSources(); }
+            loadSources();
+        }
+
+
+        // ===== 🌐 CF 优选端点（独立页） =====
+        function renderCfEndpoints(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🌐 CF 优选端点库</h1>
+                    <button class="btn btn-secondary" onclick="renderCfEndpoints(document.getElementById('main-content'))">🔄 刷新</button>
+                </div>
+                <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));"></div>
+                <div class="chart-container">
+                    <div class="flex" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                        <h3 style="margin-right:auto;">📡 按运营商筛选</h3>
+                        <select class="form-input" style="width:150px;" id="cf-isp-filter" onchange="renderCfTable()">
+                            <option value="any">全部来源</option>
+                            <option value="telecom">📶 电信优选</option>
+                            <option value="mobile">📶 移动优选</option>
+                            <option value="unicom">📶 联通优选</option>
+                            <option value="all">🌐 三网通用</option>
+                        </select>
+                        <select class="form-input" style="width:130px;" id="cf-ipver-filter" onchange="loadCfEndpoints()">
+                            <option value="">IPv4+IPv6</option>
+                            <option value="4">仅 IPv4</option>
+                            <option value="6">仅 IPv6</option>
+                        </select>
+                        <select class="form-input" style="width:130px;" id="cf-sort-filter" onchange="loadCfEndpoints()">
+                            <option value="latency">⚡ 延迟优先</option>
+                            <option value="id">🕐 默认顺序</option>
+                        </select>
+                        <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:4px;">
+                            <input type="checkbox" id="cf-only-alive" onchange="loadCfEndpoints()">仅存活
+                        </label>
+                        <button class="btn btn-primary" id="cf-ping-btn" onclick="pingCfEndpoints(this)">⚡ 测延迟</button>
+                        <button class="btn btn-secondary" onclick="copyCfEndpoints()">📋 复制当前</button>
+                        <a class="btn btn-secondary" id="cf-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
+                    </div>
+                    <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；延迟为 TCP 握手 RTT（本机视角），每轮「全量导入」自动刷新列表</p>
+                    <div class="table-container" style="max-height:520px;overflow-y:auto;"><table><thead><tr>
+                        <th>延迟</th><th>版本</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
+                    </tr></thead><tbody id="cf-tbody"></tbody></table></div>
+                </div>`;
+            loadCfEndpoints();
         }
 
         // ===== CF 优选 =====
@@ -658,7 +669,8 @@
             const f = (document.getElementById('cf-isp-filter')||{}).value || 'any';
             const lines = cfData.filter(e=>f==='any'||e.isp===f).map(e=>`${e.host}:${e.port}#${e.remark||e.isp}`);
             navigator.clipboard.writeText(lines.join('\n')).then(()=>{
-                btn.textContent='✅ 已复制'; setTimeout(()=>btn.textContent='📋 复制当前',1500);
+                if (btn) { btn.textContent='✅ 已复制'; setTimeout(()=>btn.textContent='📋 复制当前',1500); }
+                else showToast(`✅ 已复制 ${lines.length} 条端点`);
             }).catch(()=>showToast('复制失败，请用导出 txt','error'));
         }
 
@@ -1546,6 +1558,15 @@
 
         // ===== 初始化 =====
         renderPage('dashboard');
+
+        // 版本号动态同步（config/app.yaml → /api/version → logo）
+        (async () => {
+            try {
+                const v = await (await fetch(`${API}/version`)).json();
+                const el = document.getElementById('app-version');
+                if (el && v.version) el.textContent = 'v' + v.version;
+            } catch(e) {}
+        })();
 
         // 世界地图 GeoJSON 由 ensureWorldMap() 按需从本地 /vendor/world.json 加载（不依赖外网 CDN）
 

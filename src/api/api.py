@@ -578,6 +578,14 @@ async def check_job_detail(job_id: int):
     return job
 
 
+@api_router.get("/version")
+async def get_version():
+    """版本信息（前端 logo 动态展示）"""
+    cfg = get_app_config()
+    return {"name": cfg.get("name", "NodePool"),
+            "version": cfg.get("version", "1.0.0")}
+
+
 @api_router.get("/stats/trend")
 async def stats_trend(limit: int = Query(30, le=100)):
     """测速历史趋势（方案 Phase 3：定时全量测速 + 历史趋势）"""
