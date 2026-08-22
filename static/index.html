@@ -196,6 +196,8 @@
                 const rank = await rankRes.json();
                 allNodes = nodes;
 
+                if (!document.getElementById('dash-stats')) return;  // 用户已切走页面，放弃本次渲染
+
                 const active = stats.active || 0, total = stats.total || 0;
                 document.getElementById('total-nodes').textContent = `总节点: ${total}`;
                 document.getElementById('dash-stats').innerHTML = `
@@ -243,11 +245,15 @@
         }
 
         function drawPieChart(id, data) {
-            const chart = echarts.init(document.getElementById(id));
+            const _el = document.getElementById(id);
+            if (!_el) return;  // 页面已切换，放弃渲染（修复跨页 null 崩溃）
+            const chart = echarts.init(_el);
             chart.setOption({ tooltip:{trigger:'item'}, series:[{type:'pie',radius:['40%','70%'],data,label:{show:true,formatter:'{b}: {c}'}}] });
         }
         function drawBarChart(id, x, y) {
-            const chart = echarts.init(document.getElementById(id));
+            const _el = document.getElementById(id);
+            if (!_el) return;  // 页面已切换，放弃渲染
+            const chart = echarts.init(_el);
             chart.setOption({ tooltip:{trigger:'axis'}, xAxis:{type:'category',data:x}, yAxis:{type:'value'}, series:[{data:y,type:'bar',itemStyle:{color:'#0ea5e9'}}] });
         }
 
@@ -321,10 +327,13 @@
             if (!q) { renderNodePage(); return; }
             const filtered = allNodes.filter(n => (n.node_name||'').toLowerCase().includes(q) || (n.country||'').includes(q));
             renderNodeTable(filtered);
-            document.getElementById('nodes-pagination').innerHTML = '';
+            const _pg = document.getElementById('nodes-pagination');
+            if (_pg) _pg.innerHTML = '';
         }
 
         function renderNodePage() {
+            const pag = document.getElementById('nodes-pagination');
+            if (!pag) return;  // 页面已切换，放弃渲染
             const start = nodePage * nodePageSize;
             const page = allNodes.slice(start, start + nodePageSize);
             renderNodeTable(page);
@@ -333,11 +342,12 @@
             if (nodePage > 0) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage--;renderNodePage()">上一页</button>`;
             html += `<span class="text-muted" style="padding:0 12px;">${nodePage+1}/${total}</span>`;
             if (start + nodePageSize < allNodes.length) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage++;renderNodePage()">下一页</button>`;
-            document.getElementById('nodes-pagination').innerHTML = html;
+            pag.innerHTML = html;
         }
 
         function renderNodeTable(nodes) {
             const tbody = document.getElementById('nodes-tbody');
+            if (!tbody) return;  // 页面已切换，放弃渲染
             if (!nodes.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>'; return; }
             tbody.innerHTML = nodes.map(n => {
                 const speed = n.download_speed ? (n.download_speed >= 1048576 ? (n.download_speed/1048576).toFixed(1)+'MB/s' : Math.round(n.download_speed/1024)+'KB/s') : '-';
@@ -405,6 +415,7 @@
                 const stats = await statsRes.json();
 
                 const countries = mapData.countries || [];
+                if (!document.getElementById('map-stats')) return;  // 已离开地图页，放弃本次渲染
                 const total = countries.reduce((s,c) => s+c.count, 0);
                 document.getElementById('map-stats').innerHTML = `
                     <div class="stat-card"><div class="stat-value">${countries.length}</div><div class="stat-label">覆盖国家/地区</div></div>
@@ -601,14 +612,17 @@
                     fetch(`${API}/sources/health`).then(r=>r.json()),
                     fetch(`${API}/nodes/stats`).then(r=>r.json())
                 ]);
+                const healthEl = document.getElementById('source-health');
+                const tbodyEl = document.getElementById('sources-tbody');
+                if (!healthEl || !tbodyEl) return;  // 页面已切换，放弃本次渲染（修复跨页 null 崩溃）
                 const total = sources.length, healthy = health.filter(h => h.healthy).length;
                 const nodeCount = (stats && stats.total) || 0;  // 真实节点总数（源未关联节点时 reduce 恒为 0）
-                document.getElementById('source-health').innerHTML = `
+                healthEl.innerHTML = `
                     <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">数据源总数</div></div>
                     <div class="stat-card"><div class="stat-value" style="color:#22c55e;">${healthy}</div><div class="stat-label">健康源</div></div>
                     <div class="stat-card"><div class="stat-value" style="color:#38bdf8;">${nodeCount}</div><div class="stat-label">累计节点</div></div>
                 `;
-                const tbody = document.getElementById('sources-tbody');
+                const tbody = tbodyEl;
                 if (!sources.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">📭</div>暂无数据源，点击"预置源"一键导入</td></tr>'; return; }
                 tbody.innerHTML = sources.map(s => {
                     const h = health.find(h => h.id === s.id);
@@ -741,6 +755,7 @@
             try {
                 const jobs = await (await fetch(`${API}/check/history?limit=20`)).json();
                 const tbody = document.getElementById('check-tbody');
+                if (!tbody || currentPage !== 'check') return;  // 页面已切换，放弃本次渲染
                 if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无任务记录</td></tr>'; return; }
                 tbody.innerHTML = jobs.map(j => {
                     const st = j.started_at ? new Date(j.started_at*1000).toLocaleString() : '--';
@@ -751,7 +766,7 @@
                         <td>${st}</td><td>${dur}</td>
                         <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${j.error_message || j.result || '-'}</td></tr>`;
                 }).join('');
-            } catch(e) { console.error(e); showToast('数据源加载失败: ' + (e.message||'网络错误'), 'error'); }
+            } catch(e) { console.error(e); showToast('测速记录加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
         async function runCheck() {
@@ -925,6 +940,7 @@
             try {
                 const tokens = await (await fetch(`${API}/tokens`)).json();
                 const tbody = document.getElementById('tokens-tbody');
+                if (!tbody || currentPage !== 'tokens') return;  // 页面已切换，放弃本次渲染
                 if (!tokens.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty"><div class="empty-icon">🔑</div>暂无 Token，点击"创建 Token"生成订阅访问凭证</td></tr>'; return; }
                 tbody.innerHTML = tokens.map(t => `
                     <tr><td>#${t.id}</td><td>${t.name}</td>
