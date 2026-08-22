@@ -539,11 +539,23 @@ async def refresh_ranking():
 # ===== 检查任务接口 =====
 
 @api_router.post("/check/run")
-async def run_check():
-    """手动触发一次检查（后台异步执行，立即返回）"""
+async def run_check(trigger: str = "manual"):
+    """触发一次测速：manual=前台(页面实时进度) / scheduled=后台(定时调度同款)"""
+    if trigger not in ("manual", "scheduled"):
+        raise HTTPException(status_code=400, detail="trigger must be manual|scheduled")
+    ck = scheduler.checker
+    if ck.current_job and ck.current_job.get("status") == "running":
+        return {"status": "already_running", "job_id": ck.current_job["job_id"],
+                "source": ck.current_job["source"]}
     import asyncio
-    task = asyncio.create_task(scheduler.checker.run_check())
-    return {"status": "started", "task_id": str(task.get_coro().__name__) if hasattr(task, 'get_coro') else "async"}
+    asyncio.create_task(ck.run_check(trigger=trigger))
+    return {"status": "started", "trigger": trigger}
+
+
+@api_router.get("/check/progress")
+async def check_progress():
+    """当前/最近一次测速任务的实时进度（前台手动与后台定时共用）"""
+    return await scheduler.checker.get_progress()
 
 
 @api_router.get("/check/history")

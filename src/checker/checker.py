@@ -1,13 +1,16 @@
 """
 subs-check 测速引擎
 通过子进程调用 subs-check 二进制进行测速
+支持前台(手动)/后台(定时)测速 + 实时进度跟踪
 """
 import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import time
+from collections import deque
 from typing import Dict, List, Optional
 
 import httpx
@@ -16,6 +19,26 @@ from ..config import get_subs_check_config
 from ..schema import repository
 
 logger = logging.getLogger(__name__)
+
+# subs-check 日志关键行（剥 ANSI 后匹配）
+_RE_SUBS = re.compile(r'订阅链接数量.*?总计[=:]\s*(\d+)')
+_RE_FOUND = re.compile(r'获取节点数量[=:]\s*(\d+)')
+_RE_DEDUP = re.compile(r'去重后节点数量[=:]\s*(\d+)')
+_RE_ALIVE = re.compile(r'存活节点数量[=:]\s*(\d+)')
+_RE_USABLE = re.compile(r'可用节点数量[=:]\s*(\d+)')
+_RE_TRAFFIC = re.compile(r'测试总消耗流量[=:]\s*([\d.]+\s*[KMG]B)')
+_RE_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+
+# 阶段定义（前端步骤条）
+PHASES = ["拉取订阅", "解析去重", "连通性测活", "入库完成"]
+
+
+async def _safe_wait(task) -> None:
+    """等待日志泵任务结束（吞异常，最多等 10s）"""
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=10)
+    except Exception:
+        task.cancel()
 
 
 class Checker:
@@ -26,21 +49,131 @@ class Checker:
         self.output_dir = self.config.get("output_dir", "./output")
         self.api_port = 8199
         self.api_base = f"http://127.0.0.1:{self.api_port}"
+        # 当前/最近一次任务进度（前台手动 / 后台定时 共用同一状态管道）
+        self.current_job: Optional[Dict] = None
 
-    async def run_check(self) -> Dict:
-        """运行一次完整的测速检查"""
+    # ---------- 进度跟踪 ----------
+    def _job_init(self, job_id: int, trigger: str):
+        self.current_job = {
+            "job_id": job_id,
+            "source": "manual" if trigger == "manual" else "scheduled",  # manual=前台 scheduled=后台
+            "started_at": time.time(),
+            "finished_at": None,
+            "status": "running",
+            "phase_idx": 0,
+            "subs_total": None,      # 订阅数
+            "nodes_found": None,     # 获取节点
+            "nodes_deduped": None,   # 去重后
+            "nodes_alive": None,     # 存活
+            "traffic": "",
+            "log": deque(maxlen=200),
+        }
+
+    def _job_log(self, line: str):
+        """处理子进程一行输出：记录 + 解析指标 + 推进阶段"""
+        clean = _RE_ANSI.sub("", line).strip()
+        if not clean:
+            return
+        job = self.current_job
+        if not job:
+            return
+        job["log"].append(clean)
+
+        m = _RE_SUBS.search(clean)
+        if m:
+            job["subs_total"] = int(m.group(1))
+        m = _RE_FOUND.search(clean)
+        if m and job["phase_idx"] < 1:
+            job["nodes_found"] = int(m.group(1))
+            job["phase_idx"] = 1          # 进入 解析去重
+        m = _RE_DEDUP.search(clean)
+        if m:
+            job["nodes_deduped"] = int(m.group(1))
+        if "开始检测节点" in clean or "启动流水线" in clean:
+            job["phase_idx"] = max(job["phase_idx"], 2)   # 进入 连通性测活
+        m = _RE_ALIVE.search(clean)
+        if m:
+            v = int(m.group(1))
+            if job["nodes_alive"] != v:
+                job["nodes_alive"] = v
+                job["phase_idx"] = max(job["phase_idx"], 3)  # 存活出炉→入库完成阶段
+        m = _RE_USABLE.search(clean)
+        if m:
+            job["nodes_alive"] = int(m.group(1))
+        m = _RE_TRAFFIC.search(clean)
+        if m:
+            job["traffic"] = m.group(1)
+        if "检测完成" in clean or "保存本地成功" in clean:
+            job["phase_idx"] = 3
+
+    async def get_progress(self) -> Dict:
+        """进度快照：优先内存中的当前/最近任务；无则回退 DB 最近一条"""
+        job = self.current_job
+        if not job:
+            with repository.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM check_jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+            if row:
+                r = dict(row)
+                return {
+                    "job_id": r.get("id"), "source": "scheduled", "status": r.get("status"),
+                    "phase_idx": None, "phases": PHASES, "elapsed": None,
+                    "subs_total": None, "nodes_found": None, "nodes_deduped": None,
+                    "nodes_alive": None, "traffic": "", "log": [],
+                    "finished_at": r.get("finished_at"),
+                    "error_message": r.get("error_message"),
+                }
+            return {"status": "idle", "phases": PHASES}
+
+        elapsed = (job["finished_at"] or time.time()) - job["started_at"]
+        return {
+            "job_id": job["job_id"], "source": job["source"],
+            "status": job["status"], "phase_idx": job["phase_idx"],
+            "phases": PHASES, "elapsed": round(elapsed),
+            "subs_total": job["subs_total"], "nodes_found": job["nodes_found"],
+            "nodes_deduped": job["nodes_deduped"], "nodes_alive": job["nodes_alive"],
+            "traffic": job["traffic"],
+            "log": list(job["log"])[-80:],
+            "finished_at": job["finished_at"],
+            "error_message": job.get("error"),
+        }
+
+    async def _pump_stream(self, stream, logfile) -> None:
+        """逐行读取子进程输出：写文件日志 + 更新内存进度"""
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", "ignore").rstrip()
+                try:
+                    with open(logfile, "a") as f:
+                        f.write(text + "\n")
+                except OSError:
+                    pass
+                self._job_log(text)
+        except Exception as e:
+            logger.debug(f"log pump ended: {e}")
+
+
+    async def run_check(self, trigger: str = "manual") -> Dict:
+        """运行一次完整的测速检查
+        trigger: manual=前台(用户手动触发) / scheduled=后台(定时调度)"""
         job_id = repository.add_check_job("full_check")
+        self._job_init(getattr(job_id, "id", job_id), trigger)
+        job = self.current_job
 
         try:
             sources = repository.list_sources(enabled_only=True)
             if not sources:
                 logger.warning("No enabled sources found")
                 repository.update_check_job(job_id.id, "failed", error="No enabled sources")
-                return {"status": "no_sources", "job_id": job_id.id}
+                job.update({"status": "failed", "finished_at": time.time(), "error": "No enabled sources"})
+                return {"status": "no_sources", "job_id": job_id}
 
             await self._update_subs_check_config(sources)
 
-            logger.info(f"Starting subs-check with {len(sources)} sources")
+            logger.info(f"Starting subs-check with {len(sources)} sources ({trigger})")
             result = await self._run_subs_check()
 
             if result.get("success"):
@@ -50,19 +183,23 @@ class Checker:
                 scored = update_node_scores()
                 logger.info(f"Updated scores for {scored} nodes")
                 repository.update_check_job(job_id.id, "completed", result=json.dumps(result))
+                job.update({"status": "completed", "finished_at": time.time()})
                 # 测速后异步刷新 GeoIP 出口识别（不阻塞返回）
                 import asyncio
                 from ..geoip import refresh_node_geo
                 asyncio.create_task(refresh_node_geo(limit=300))
             else:
-                repository.update_check_job(job_id.id, "failed", error=result.get("error", "Unknown error"))
+                err = result.get("error", "Unknown error")
+                repository.update_check_job(job_id.id, "failed", error=err)
+                job.update({"status": "failed", "finished_at": time.time(), "error": err})
 
             return result
 
         except Exception as e:
             logger.error(f"Check failed: {e}")
             repository.update_check_job(job_id.id, "failed", error=str(e))
-            return {"status": "error", "job_id": job_id.id, "error": str(e)}
+            job.update({"status": "failed", "finished_at": time.time(), "error": str(e)})
+            return {"status": "error", "job_id": job_id, "error": str(e)}
 
     async def _update_subs_check_config(self, sources: List):
         """动态更新 subs-check 配置文件中的订阅源（保留其他设置）"""
@@ -113,19 +250,24 @@ class Checker:
                     pass
             start_ts = time.time()
 
-            # 启动 subs-check（独立进程组，便于整组清理），日志重定向到文件
+            # 启动 subs-check（独立进程组，便于整组清理）；stdout/stderr 走管道逐行解析实时进度
+            logfile = "/tmp/subs-check.log"
+            with open(logfile, "a") as f:
+                f.write(f"\n===== NodePool 任务启动 ({self.current_job['source']}) "
+                        f"{time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
             process = await asyncio.create_subprocess_exec(
                 self.binary_path,
                 "-f", self.config_path,
-                stdout=open("/tmp/subs-check.log", "a"),
-                stderr=open("/tmp/subs-check.log", "a"),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.abspath(self.binary_path)),
                 start_new_session=True,
             )
+            pump = asyncio.create_task(self._pump_stream(process.stdout, logfile))
 
             max_wait = 5400  # 90 分钟
             waited = 0
-            poll_interval = 30
+            poll_interval = 5
 
             while waited < max_wait:
                 await asyncio.sleep(poll_interval)
@@ -140,9 +282,11 @@ class Checker:
                     # 等 60 秒确保写入完成
                     await asyncio.sleep(60)
                     self._terminate(process)
+                    await _safe_wait(pump)
                     return await self._read_results()
 
             self._terminate(process)
+            await _safe_wait(pump)
             return {"success": False, "error": f"Timeout after {max_wait}s"}
 
         except FileNotFoundError:

@@ -1045,13 +1045,96 @@
         function renderCheck(main) {
             main.innerHTML = `
                 <div class="page-header"><h1 class="page-title">⚡ 测速任务</h1>
-                    <button class="btn btn-primary" onclick="runCheck()">⚡ 立即测速</button>
+                    <div class="flex">
+                        <button class="btn btn-secondary" id="ck-btn-bg" onclick="runCheck('scheduled')">🌙 后台测速</button>
+                        <button class="btn btn-primary" id="ck-btn-fg" onclick="runCheck('manual')">⚡ 前台测速</button>
+                    </div>
                 </div>
+                <div id="ck-progress"></div>
+                <div class="page-header" style="margin-top:28px;"><h2 style="font-size:20px;font-weight:700;">📜 任务历史</h2></div>
                 <div class="table-container"><table><thead><tr>
                     <th>ID</th><th>类型</th><th>状态</th><th>开始时间</th><th>耗时</th><th>结果</th>
                 </tr></thead><tbody id="check-tbody"></tbody></table></div>
             `;
             loadCheckHistory();
+            pollCheckProgress();   // 启动进度轮询
+        }
+
+        let _ckTimer = null;
+
+        async function pollCheckProgress() {
+            if (_ckTimer) { clearTimeout(_ckTimer); _ckTimer = null; }
+            if (currentPage !== 'check') return;
+            try {
+                const d = await (await fetch(`${API}/check/progress`)).json();
+                renderProgress(d);
+                // running 时 2s 快轮询，否则 6s 慢轮询（页面保持时）
+                _ckTimer = setTimeout(pollCheckProgress, d.status === 'running' ? 2000 : 6000);
+            } catch(e) { _ckTimer = setTimeout(pollCheckProgress, 8000); }
+        }
+
+        function renderProgress(d) {
+            const box = document.getElementById('ck-progress');
+            if (!box || currentPage !== 'check') return;
+            if (d.status === 'idle' || (!d.job_id && d.status !== 'running')) { box.innerHTML = ''; return; }
+
+            const running = d.status === 'running';
+            const srcBadge = d.source === 'manual'
+                ? '<span class="badge badge-info">🧑‍💻 前台 · 手动触发</span>'
+                : '<span class="badge badge-secondary">⏰ 后台 · 定时调度</span>';
+            const stBadge = running
+                ? '<span class="badge badge-warning"><span class="loading" style="width:12px;height:12px;border-width:2px;"></span> 运行中</span>'
+                : d.status === 'completed' ? '<span class="badge badge-success">✅ 已完成</span>'
+                : d.status === 'failed' ? '<span class="badge badge-danger">❌ 失败</span>' : `<span class="badge badge-secondary">${d.status}</span>`;
+            const dur = d.elapsed != null ? `${Math.floor(d.elapsed/60)}分${Math.round(d.elapsed%60)}秒` : '--';
+
+            // 步骤条
+            const steps = (d.phases || []).map((name, i) => {
+                let cls = '', icon = '⬜';
+                if (d.phase_idx == null) { cls = ''; }
+                else if (i < d.phase_idx || (!running && d.phase_idx >= i && d.status === 'completed')) { cls = 'done'; icon = '✅'; }
+                else if (i === d.phase_idx) { cls = running ? 'active' : 'active'; icon = running ? '🔄' : '⏸'; }
+                return `<div style="flex:1;text-align:center;">
+                    <div style="font-size:22px;margin-bottom:4px;">${icon}</div>
+                    <div style="font-size:12px;color:${cls==='active'&&running?'var(--primary)':'var(--text-muted)'};font-weight:${cls==='active'?600:400};">${name}</div>
+                    ${i < (d.phases||[]).length-1 ? '' : ''}
+                </div>`;
+            }).join('<div style="width:24px;border-top:2px dashed var(--border);align-self:flex-start;margin-top:16px;"></div>');
+
+            const num = (v, label, accent) => `
+                <div style="flex:1;background:var(--surface-2);border-radius:10px;padding:12px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:${accent};">${v ?? '--'}</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${label}</div>
+                </div>`;
+            const alivePct = (d.nodes_alive != null && d.nodes_deduped) ? Math.round(d.nodes_alive / d.nodes_deduped * 100) : null;
+            const bar = alivePct != null ? `
+                <div style="background:var(--surface-2);border-radius:99px;height:8px;overflow:hidden;margin:14px 0 4px;">
+                    <div style="width:${alivePct}%;height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:99px;transition:width .5s ease;"></div>
+                </div>
+                <div class="text-muted" style="font-size:11px;">存活率 ${alivePct}%（存活/去重后）</div>` : '';
+
+            const logLines = (d.log || []).slice(-40).map(l => escHtml(l)).join('\n');
+            box.innerHTML = `
+                <div class="chart-container">
+                    <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <div class="flex">${srcBadge}${stBadge}<span class="badge badge-secondary">⏱ ${dur}</span>${d.traffic?`<span class="badge badge-secondary">📶 流量 ${escHtml(d.traffic)}</span>`:''}</div>
+                        <span class="text-muted" style="font-size:12px;">任务 #${d.job_id ?? '--'}${d.error_message?` · <span style="color:var(--danger)">${escHtml(String(d.error_message).slice(0,60))}</span>`:''}</span>
+                    </div>
+                    <div style="display:flex;gap:6px;margin-bottom:14px;">${steps}</div>
+                    <div style="display:flex;gap:10px;">
+                        ${num(d.nodes_found,'📥 获取节点','#2563eb')}
+                        ${num(d.nodes_deduped,'🧹 去重后','#d97706')}
+                        ${num(d.nodes_alive,'❤️ 存活节点','#16a34a')}
+                    </div>
+                    ${bar}
+                    ${logLines ? `<pre id="ck-log" style="background:#0f172a;color:#7dd3fc;border-radius:12px;padding:14px;max-height:220px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.55;margin:14px 0 0;white-space:pre-wrap;word-break:break-all;">${logLines}</pre>`:''}
+                </div>`;
+            // 日志自动滚到底
+            const lg = document.getElementById('ck-log');
+            if (lg) lg.scrollTop = lg.scrollHeight;
+            // 按钮态
+            const fg = document.getElementById('ck-btn-fg'), bg = document.getElementById('ck-btn-bg');
+            if (fg && bg) { fg.disabled = running; fg.title = running ? '已有测速在运行' : ''; }
         }
 
         async function loadCheckHistory() {
@@ -1072,11 +1155,16 @@
             } catch(e) { console.error(e); showToast('测速记录加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
-        async function runCheck() {
+        async function runCheck(trigger = 'manual') {
+            const label = trigger === 'manual' ? '前台' : '后台';
             try {
-                await fetch(`${API}/check/run`, {method:'POST'});
-                showToast('测速任务已启动（后台执行）');
-                setTimeout(() => { if (currentPage === 'check') loadCheckHistory(); }, 3000);
+                const r = await (await fetch(`${API}/check/run?trigger=${trigger}`, {method:'POST'})).json();
+                if (r.status === 'already_running') {
+                    showToast(`已有${r.source==='manual'?'前台':'后台'}测速正在运行（任务 #${r.job_id}）`, 'error');
+                } else {
+                    showToast(`${label}测速已启动，正在跟踪实时进度…`);
+                    setTimeout(() => { if (currentPage === 'check') pollCheckProgress(); }, 1200);
+                }
             } catch(e) { showToast('启动失败: '+e.message, 'error'); }
         }
 

@@ -95,7 +95,7 @@ class Scheduler:
         logger.info("Starting speed check...")
         # 使用 create_task 让测速在后台运行，不阻塞 event loop
         import asyncio
-        asyncio.create_task(self.checker.run_check())
+        asyncio.create_task(self.checker.run_check(trigger="scheduled"))
         logger.info("Speed check started in background")
 
     async def _reenable_sources(self):
