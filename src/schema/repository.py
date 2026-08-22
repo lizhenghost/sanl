@@ -58,7 +58,20 @@ def _migrate(conn):
     """)
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_fingerprint ON nodes(fingerprint)")
 
-    # CF 优选端点表（ip/domain:port 列表，非代理节点，独立管理；isp: telecom/mobile/unicom/all）
+    # CF 扫描结果表（官方/非标网段扫描输出）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cf_scan_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 443,
+            latency_ms INTEGER,
+            speed_mbps REAL,
+            colo TEXT,
+            created_at INTEGER
+        )
+    """)
+    conn.commit()
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cf_endpoints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -278,6 +291,39 @@ def cf_isp_stats() -> dict:
             "SELECT isp, COUNT(*) AS n FROM cf_endpoints GROUP BY isp"
         ).fetchall()
         return {r["isp"]: r["n"] for r in rows}
+
+
+def save_scan_results(results: List[dict]) -> int:
+    """保存一轮扫描结果（覆盖上一轮）"""
+    now = int(__import__('time').time())
+    with get_connection() as conn:
+        conn.execute("DELETE FROM cf_scan_results")
+        conn.executemany(
+            """INSERT INTO cf_scan_results (ip, port, latency_ms, speed_mbps, colo, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ip"], int(r.get("port", 443)), r.get("latency_ms"),
+              r.get("speed_mbps"), r.get("colo", ""), now) for r in results]
+        )
+        conn.commit()
+        return len(results)
+
+
+def get_scan_results(limit: int = 500) -> list:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT ip, port, latency_ms, speed_mbps, colo, created_at "
+            "FROM cf_scan_results ORDER BY latency_ms IS NULL, latency_ms, speed_mbps DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_scan_results() -> int:
+    with get_connection() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM cf_scan_results").fetchone()[0]
+        conn.execute("DELETE FROM cf_scan_results")
+        conn.commit()
+        return n
 
 
 def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,

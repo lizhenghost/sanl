@@ -257,6 +257,65 @@ async def ping_cf_endpoints(
             "message": f"延迟检测已启动（{isp}，最多 {limit} 个端点），约 30-60 秒后刷新查看"}
 
 
+# ---------- CF 网段扫描器（参考 CFData-WEB v1.7.8） ----------
+from ..checker import cf_scanner
+
+
+@api_router.get("/cf/scan/meta")
+async def cf_scan_meta():
+    """扫描器元信息：可选端口、内置测速网址"""
+    return {"ports": cf_scanner.SCAN_PORTS,
+            "speed_urls": [{"key": u["key"], "name": u["name"]} for u in cf_scanner.SPEED_URLS]}
+
+
+@api_router.get("/cf/scan/status")
+async def cf_scan_status():
+    return {k: (list(v) if k == "log" else v) for k, v in cf_scanner.STATE.items()}
+
+
+@api_router.post("/cf/scan")
+async def cf_scan_start(
+    background_tasks: BackgroundTasks,
+    ip_type: int = Query(4, ge=4, le=6),
+    port: int = Query(443),
+    concurrency: int = Query(100, ge=10, le=1000),
+    max_latency: int = Query(500, ge=20, le=3000, description="扫描合格延迟 ms"),
+    min_speed: float = Query(0, ge=0, le=100, description="测试合格速度 MB/s，0=跳过测速"),
+    top_n: int = Query(20, ge=1, le=500, description="测速结果数量 TOP N"),
+    scan_mode: str = Query("tcping", pattern="^(tcping|http)$"),
+    speed_key: str = Query("auto", description="测速网址 key，auto=自动选择"),
+    speed_url: str = Query("", description="自定义测速网址（优先于 speed_key）"),
+    slim: bool = Query(True, description="精简地址库：按 /24 子网抽样探测"),
+    custom_ranges: str = Query("", description="非标优选：自定义网段，逗号分隔，如 103.22.200.0/24,2606:4700::/32")
+):
+    """启动一轮 CF 网段扫描（官方优选=CF官方段；非标优选=自定义网段）"""
+    ranges = [r.strip() for r in (custom_ranges or "").split(",") if r.strip()]
+    params = dict(ip_type=ip_type, port=port, concurrency=concurrency,
+                  max_latency=max_latency, min_speed=min_speed, top_n=top_n,
+                  scan_mode=scan_mode, speed_key=speed_key, speed_url=speed_url,
+                  slim=slim, custom_ranges=ranges)
+
+    async def _run():
+        await cf_scanner.run_scan(params)
+
+    if cf_scanner.STATE["running"]:
+        raise HTTPException(status_code=409, detail="已有扫描在进行中")
+    background_tasks.add_task(_run)
+    return {"status": "started", "params": params}
+
+
+@api_router.get("/cf/scan/results")
+async def cf_scan_results(limit: int = Query(500, le=2000)):
+    items = repository.get_scan_results(limit=limit)
+    return {"total": len(items), "results": items}
+
+
+@api_router.delete("/cf/scan/results")
+async def cf_scan_results_clear():
+    n = repository.clear_scan_results()
+    return {"cleared": n}
+
+
 @api_router.get("/cf/endpoints/export")
 async def export_cf_endpoints(
     isp: str = Query("any", pattern="^(telecom|mobile|unicom|all|any)$"),

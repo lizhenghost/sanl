@@ -110,6 +110,7 @@
                 <div class="nav-item" data-page="nodes">🔗 节点列表</div>
                 <div class="nav-item" data-page="map">🌍 世界地图</div>
                 <div class="nav-item" data-page="sources">📡 数据源</div>
+                <div class="nav-item" data-page="cfscan">🛰 CF扫描</div>
                 <div class="nav-item" data-page="check">⚡ 测速任务</div>
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
@@ -158,6 +159,7 @@
                 case 'nodes': renderNodes(main); break;
                 case 'map': renderMap(main); break;
                 case 'sources': renderSources(main); break;
+                case 'cfscan': renderCfScan(main); break;
                 case 'check': renderCheck(main); break;
                 case 'subscribe': renderSubscribe(main); break;
                 case 'tokens': renderTokens(main); break;
@@ -628,6 +630,161 @@
             navigator.clipboard.writeText(lines.join('\n')).then(()=>{
                 btn.textContent='✅ 已复制'; setTimeout(()=>btn.textContent='📋 复制当前',1500);
             }).catch(()=>showToast('复制失败，请用导出 txt','error'));
+        }
+
+        // ===== 🛰 CF 网段扫描（参考 CFData-WEB） =====
+        let scanMeta = {ports:[443], speed_urls:[]}, scanTimer = null;
+        async function renderCfScan(main){
+            try{
+                const res = await fetch(`${API}/cf/scan/meta`); scanMeta = await res.json();
+            }catch(e){}
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🛰 CF 网段扫描</h1>
+                    <div class="flex">
+                        <button class="btn btn-secondary" onclick="renderPage('cfscan')">🔄 刷新</button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <div class="flex" style="margin-bottom:12px;">
+                        <button class="btn btn-primary" id="scan-range-official" onclick="switchScanRange('official')">☁️ 官方优选</button>
+                        <button class="btn btn-secondary" id="scan-range-custom" onclick="switchScanRange('custom')">📁 非标优选</button>
+                    </div>
+                    <div id="scan-custom-box" style="display:none;margin-bottom:12px;">
+                        <input class="form-input" style="width:100%;font-family:monospace;font-size:13px;" id="sc-custom-ranges" placeholder='自定义网段（逗号分隔）：103.22.200.0/24, 162.159.192.0/24, 2606:4700::/32'>
+                    </div>
+                    <h3 style="margin-bottom:10px;">⚙️ 扫描参数</h3>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;">
+                        <label class="text-muted" style="font-size:13px;">🌐 IP 类型
+                            <select class="form-input" id="sc-ip-type" style="width:100%;margin-top:4px;">
+                                <option value="4">IPv4</option><option value="6">IPv6</option>
+                            </select></label>
+                        <label class="text-muted" style="font-size:13px;">🔌 测试端口
+                            <select class="form-input" id="sc-port" style="width:100%;margin-top:4px;">
+                                ${scanMeta.ports.map(p=>`<option ${p===443?'selected':''}>${p}</option>`).join('')}
+                            </select></label>
+                        <label class="text-muted" style="font-size:13px;">🚀 并发数量
+                            <input class="form-input" type="number" id="sc-concurrency" value="200" min="10" max="1000" style="width:100%;margin-top:4px;"></label>
+                        <label class="text-muted" style="font-size:13px;">⏱ 扫描合格延迟 (ms)
+                            <input class="form-input" type="number" id="sc-max-latency" value="500" min="20" max="3000" style="width:100%;margin-top:4px;"></label>
+                        <label class="text-muted" style="font-size:13px;">📈 测试合格速度 (MB/s, 0=跳过)
+                            <input class="form-input" type="number" step="0.01" id="sc-min-speed" value="0.1" min="0" style="width:100%;margin-top:4px;"></label>
+                        <label class="text-muted" style="font-size:13px;">🏁 测速结果数量 TOP
+                            <input class="form-input" type="number" id="sc-top-n" value="20" min="1" max="500" style="width:100%;margin-top:4px;"></label>
+                        <label class="text-muted" style="font-size:13px;">📡 扫描方式
+                            <select class="form-input" id="sc-mode" style="width:100%;margin-top:4px;">
+                                <option value="tcping">TCPing（默认）</option><option value="http">HTTP 探测(带colo)</option>
+                            </select></label>
+                        <label class="text-muted" style="font-size:13px;">🔗 测速网址
+                            <div class="flex" style="gap:6px;margin-top:4px;">
+                                <select class="form-input" id="sc-speed-key" style="flex:1;">
+                                    ${scanMeta.speed_urls.map(u=>`<option value="${u.key}">${u.name}</option>`).join('')}
+                                    <option value="__custom__">自定义…</option>
+                                </select>
+                            </div>
+                            <input class="form-input" id="sc-speed-url" placeholder="https://…（选自定义时填写）" style="width:100%;margin-top:4px;display:none;"></label>
+                        <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:8px;">
+                            <input type="checkbox" id="sc-slim" checked>🧹 精简地址库（/24 抽样）
+                        </label>
+                    </div>
+                    <div class="flex mt-4">
+                        <button class="btn btn-primary" id="sc-start-btn" onclick="startCfScan(this)" style="min-width:220px;">✨ 开始扫描与测试</button>
+                        <button class="btn btn-danger" onclick="clearScanResults()">🗑 清空结果</button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <div class="flex" style="align-items:center;">
+                        <h3 style="margin-right:auto;">📊 进度 <span id="sc-progress-text" class="text-muted" style="font-size:13px;">等待操作…</span></h3>
+                    </div>
+                    <div style="background:#0f172a;border-radius:8px;padding:10px;max-height:180px;overflow-y:auto;font-family:monospace;font-size:12px;color:#94a3b8;" id="sc-log">[系统] 等待操作...</div>
+                </div>
+                <div class="table-container"><table><thead><tr>
+                    <th>延迟</th><th>速度</th><th>IP</th><th>端口</th><th>数据中心</th><th>时间</th>
+                </tr></thead><tbody id="sc-results-tbody"></tbody></table></div>
+                <div class="flex mt-4">
+                    <button class="btn btn-primary" onclick="copyScanResults(this)">📋 一键复制全部</button>
+                    <a class="btn btn-secondary" id="sc-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
+                </div>
+            `;
+            const sk = document.getElementById('sc-speed-key');
+            sk.onchange = ()=>{ document.getElementById('sc-speed-url').style.display = sk.value==='__custom__'?'':'none'; };
+            loadScanStatus(); loadScanResults();
+        }
+        let scanRange = 'official';
+        function switchScanRange(r){
+            scanRange = r;
+            document.getElementById('scan-range-official').className = 'btn '+(r==='official'?'btn-primary':'btn-secondary');
+            document.getElementById('scan-range-custom').className = 'btn '+(r==='custom'?'btn-primary':'btn-secondary');
+            document.getElementById('scan-custom-box').style.display = r==='custom'?'':'none';
+        }
+        async function startCfScan(btn){
+            const speedKey = document.getElementById('sc-speed-key').value;
+            const q = new URLSearchParams({
+                ip_type: document.getElementById('sc-ip-type').value,
+                port: document.getElementById('sc-port').value,
+                concurrency: document.getElementById('sc-concurrency').value,
+                max_latency: document.getElementById('sc-max-latency').value,
+                min_speed: document.getElementById('sc-min-speed').value,
+                top_n: document.getElementById('sc-top-n').value,
+                scan_mode: document.getElementById('sc-mode').value,
+                slim: document.getElementById('sc-slim').checked,
+                speed_key: speedKey==='__custom__' ? '' : speedKey,
+                speed_url: speedKey==='__custom__' ? document.getElementById('sc-speed-url').value.trim() : '',
+                custom_ranges: scanRange==='custom' ? document.getElementById('sc-custom-ranges').value.trim() : '',
+            });
+            btn.disabled = true; btn.textContent='⏳ 扫描中…';
+            try{
+                const res = await fetch(`${API}/cf/scan?${q}`, {method:'POST'});
+                if(!res.ok) throw new Error((await res.json()).detail||res.status);
+                showToast('🛰 扫描已启动','success');
+                if(scanTimer) clearInterval(scanTimer);
+                scanTimer = setInterval(loadScanStatus, 1500);
+            }catch(e){ showToast('❌ 启动失败: '+e.message,'error'); btn.disabled=false; btn.textContent='✨ 开始扫描与测试'; }
+        }
+        async function loadScanStatus(){
+            try{
+                const s = await (await fetch(`${API}/cf/scan/status`)).json();
+                const pt = document.getElementById('sc-progress-text');
+                if(pt) pt.textContent = s.running
+                    ? `${s.phase} · ${s.scanned}/${s.total} · 已合格 ${s.found}`
+                    : (s.phase==='done' ? `完成 · 合格 ${s.found} 个` : (s.phase||'等待操作…'));
+                const lg = document.getElementById('sc-log');
+                if(lg && s.log && s.log.length && lg.dataset.n !== String(s.log.length)){
+                    lg.dataset.n = String(s.log.length);
+                    lg.textContent = s.log.slice(-30).join('\n'); lg.scrollTop = lg.scrollHeight;
+                }
+                if(!s.running){
+                    if(scanTimer){ clearInterval(scanTimer); scanTimer=null; }
+                    const b = document.getElementById('sc-start-btn');
+                    if(b && b.disabled){ b.disabled=false; b.textContent='✨ 开始扫描与测试'; loadScanResults(); }
+                }
+            }catch(e){}
+        }
+        async function loadScanResults(){
+            try{
+                const d = await (await fetch(`${API}/cf/scan/results?limit=500`)).json();
+                const tb = document.getElementById('sc-results-tbody'); if(!tb) return;
+                tb.innerHTML = d.results.map(r=>{
+                    const t = r.created_at? new Date(r.created_at*1000).toLocaleString():'-';
+                    return `<tr><td>${r.latency_ms!=null?r.latency_ms+'ms':'—'}</td>
+                        <td>${r.speed_mbps!=null? r.speed_mbps+' MB/s':'—'}</td>
+                        <td><code>${r.ip}</code></td><td>${r.port}</td>
+                        <td>${r.colo||'—'}</td><td class="text-muted">${t}</td></tr>`;
+                }).join('') || '<tr><td colspan="6" class="text-muted">暂无结果——配置参数后点「开始扫描与测试」</td></tr>';
+                const exp = document.getElementById('sc-export-btn');
+                if(exp) exp.href = `data:text/plain;charset=utf-8,${encodeURIComponent(d.results.map(r=>`${r.ip}:${r.port}`).join('\n'))}`;
+                exp.download = 'cf_scan_results.txt';
+            }catch(e){}
+        }
+        function copyScanResults(btn){
+            fetch(`${API}/cf/scan/results?limit=500`).then(r=>r.json()).then(d=>{
+                navigator.clipboard.writeText(d.results.map(r=>`${r.ip}:${r.port}`).join('\n')).then(()=>{
+                    btn.textContent='✅ 已复制'; setTimeout(()=>btn.textContent='📋 一键复制全部',1500);
+                }).catch(()=>showToast('复制失败','error'));
+            });
+        }
+        async function clearScanResults(){
+            await fetch(`${API}/cf/scan/results`, {method:'DELETE'});
+            showToast('🗑 已清空','success'); loadScanResults();
         }
 
         let sourcesTab = 'list';
