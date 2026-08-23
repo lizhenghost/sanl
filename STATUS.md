@@ -44,3 +44,35 @@
 - `/sub/{token}/clash` 含 proxy-groups+rules，国家名中文
 - `/api/sources?enabled=true` 返回 speed_test 字段，source1 切换 ok
 - 全部改动 `py_compile` 通过，启动无 Traceback
+
+
+## 本轮：性能与可用性优化（2026-08-23）
+
+### ✅ 后端 TTL 缓存层（P0，用户强调"多命中缓存，不要不命中缓存"）
+- 新增 `src/api/cache.py`：进程内 TTL 缓存装饰器 `@cached(ttl)` + `invalidate_all()` + `cache_stats()`
+  - key = 函数名 + 全部可序列化参数（自动区分 limit/offset/sort 等不同查询）
+  - 命中/未命中计数供面板展示
+- 已加缓存的读端点：`/nodes/stats`(5s)、`/map`(5s)、`/sources/health`(5s)、`/ranking`(3s)、`/stats/trend`(5s)、`/check/history`(3s)、`/sources`(3s)、`/nodes`(3s)
+- 失效策略：
+  1. HTTP 中间件：任何非 GET/HEAD/OPTIONS 请求完成后 `invalidate_all()`（写操作低频，清空保正确且命中率高）
+  2. 后台任务（抓取/测速不经过 HTTP）：在 `checker.apply_check_results` 后、`pool_importer` 入库后手动 `invalidate_all()`
+- 新增 `/api/cache/status` 返回 hit/miss/size；实测连续请求命中 16 / 未命中 12（冷启动后攀升）
+- 前端新增右下角「⚡缓存」浮标，点击弹窗显示命中率
+
+### ✅ 前端轮询节流（D2）
+- 全局任务轮询改为**自适应**：有活动任务 2.5s，空闲降频到 10s（`try/finally` + `_gtTimer` 自调度）
+- 后端缓存兜底，空闲轮询几乎零查询成本
+
+### ✅ GeoIP 刷新优化（C3，原误报 "0/300"）
+- 排查确认：**非查询失败**——active 645 节点中 638 个已正确填充 country，`0/300` 只是"取的 300 个全是已正确节点无变化"
+- 优化：新增 `repository.list_nodes_missing_geo()`，刷新时**只补国家缺失的节点**，跳过已正确节点
+- 实测：缺失 7 个节点一次性补全（updated=7, looked_up=5），日志不再出现误导性 0/300
+
+### ✅ 核验已实现的既有能力（确认无需重复开发）
+- **C5 订阅默认可用节点**：`/sub/{token}/{fmt}` 默认 `status=active`，走 `get_ranking`（只出测速通过的高分节点），不吐死链
+- **E1 CF 优选端点利用**：`/api/cf/endpoints` 已具备 ISP 分类（all 19801/mobile 5093/telecom 1852/unicom 2813）+ IP 版本分类 + 按延迟排序 + 扫描测速（实测快速端点 latency 3ms）；CF 端点无协议只能作"优选 IP 参考"，配合 ws/reality 协议节点作 server 优化
+- **E3 节点保活**：`apply_check_results` → `mark_missing_inactive` 已实现——源消失的 auto 节点每轮降级 inactive，连续 3 轮失败自动进 dead（黑名单）；手动导入节点永不降级（设计权衡）
+
+### 回归
+- 14 个核心端点（nodes/stats/map/ranking/sources/sources-health/trend/check-history/nodes/tasks/cf-endpoints/cache-status/tokens-stats/convert-formats/openapi）全 200
+- 全改动 `py_compile` 通过，启动无 Traceback，scheduler 4 个任务正常注册

@@ -117,6 +117,11 @@ async def _import_one(sc: Scraper, src, summary: dict):
         except Exception:
             pass
         summary["sources_ok"] += 1
+        try:
+            from ..api.cache import invalidate_all
+            invalidate_all()  # 抓取入库后清空读缓存
+        except Exception:
+            pass
         logger.info(f"源[{src.name}] 解析 {node_count} 节点 + {len(cf_eps)} CF端点")
     except Exception as e:
         summary["sources_failed"] += 1

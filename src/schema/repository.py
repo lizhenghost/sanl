@@ -282,6 +282,21 @@ def apply_check_results(results: List[dict]) -> dict:
     return {"alive": alive, "marked_inactive": marked}
 
 
+def list_nodes_missing_geo(limit: int = 300, status: str = "active") -> List[Node]:
+    """取国家/国家码尚未填充的节点（GeoIP 刷新优先补这些，避免对已正确节点做无效查询）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM nodes WHERE status=? AND (country IS NULL OR country='') ORDER BY id ASC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        nodes = []
+        for r in rows:
+            d = dict(r)
+            d['node_data'] = json.loads(d.get('node_data', '{}'))
+            nodes.append(Node(**d))
+        return nodes
+
+
 def get_cf_endpoints(limit: int = 5000, isp: Optional[str] = None,
                      sort: str = "id", only_alive: bool = False,
                      ip_version: Optional[int] = None) -> list:

@@ -160,14 +160,24 @@ def _node_server(node) -> str:
 
 async def refresh_node_geo(limit: int = 300) -> dict:
     """
-    刷新节点 GeoIP：取 active 节点的 server 地址查询出口位置
+    刷新节点 GeoIP：优先补「国家/国家码缺失」的 active 节点（已正确的节点跳过，避免无效查询）
     更新 nodes.country（emoji 国旗）/ country_code
     """
-    nodes = repository.list_nodes(status="active", limit=limit)
+    # 优先补缺失；若缺失的很少，则返回后无需查询已正确节点（日志因此不再出现 0/300）
+    missing = repository.list_nodes_missing_geo(limit=limit, status="active")
+    if missing:
+        nodes = missing
+    else:
+        nodes = []  # 全部已有国家，无需查询
+
+    if not nodes:
+        logger.info("GeoIP refresh: 所有 active 节点已具备出口信息，无待补项")
+        return {"updated": 0, "looked_up": 0, "total": 0}
+
     # 去重收集 server
     servers = list({s for s in (_node_server(n) for n in nodes) if s})
     if not servers:
-        return {"updated": 0, "looked_up": 0}
+        return {"updated": 0, "looked_up": 0, "total": len(nodes)}
 
     geo = await lookup_servers(servers)
     updated = 0

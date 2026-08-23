@@ -13,6 +13,7 @@ from typing import List, Optional, Dict
 
 from ..config import get_app_config, get_scheduler_config
 from ..schema import repository, models
+from .cache import cached, invalidate_all, cache_stats
 from ..scheduler.scheduler import Scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -91,6 +92,18 @@ def create_app() -> FastAPI:
     from .converter import router as convert_router
     app.include_router(convert_router, prefix="/api", tags=["converter"])
     app.include_router(sub_router, prefix="/sub", tags=["subscription"])
+
+    # 缓存失效：任何非只读请求（POST/PUT/DELETE）完成后清空读缓存。
+    # 写操作频率远低于读（每小时抓取/测速），清空可保正确且命中率高。
+    @app.middleware("http")
+    async def invalidate_on_write(request: Request, call_next):
+        response = await call_next(request)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            try:
+                invalidate_all()
+            except Exception:
+                pass
+        return response
     
     return app
 
@@ -124,6 +137,7 @@ async def create_source(source: SourceCreate):
 
 
 @api_router.get("/sources", response_model=List[models.Source])
+@cached(ttl=3)
 async def list_sources(enabled: bool = True):
     """获取数据源列表"""
     return repository.list_sources(enabled_only=enabled)
@@ -442,6 +456,7 @@ async def export_cf_endpoints(
 # ===== 节点接口 =====
 
 @api_router.get("/nodes", response_model=List[models.Node])
+@cached(ttl=3)
 async def list_nodes(
     status: Optional[str] = Query(None),
     country: Optional[str] = Query(None),
@@ -476,6 +491,7 @@ async def list_nodes(
 
 
 @api_router.get("/nodes/stats")
+@cached(ttl=5)
 async def node_stats():
     """获取节点统计"""
     total = repository.count_nodes()
@@ -708,6 +724,7 @@ async def get_token_stats():
 
 
 @api_router.get("/ranking")
+@cached(ttl=3)
 async def get_ranking(
     limit: int = Query(50, le=200),
     country: Optional[str] = Query(None),
@@ -777,6 +794,7 @@ async def check_progress():
 
 
 @api_router.get("/check/history")
+@cached(ttl=3)
 async def check_history(limit: int = 10):
     """获取检查历史"""
     with repository.get_connection() as conn:
@@ -805,6 +823,7 @@ async def get_version():
 
 
 @api_router.get("/stats/trend")
+@cached(ttl=5)
 async def stats_trend(limit: int = Query(30, le=100)):
     """测速历史趋势（方案 Phase 3：定时全量测速 + 历史趋势）"""
     return repository.get_score_trend(limit)
@@ -933,7 +952,14 @@ async def validate_token(request: Request):
 
 # ===== 世界地图数据 =====
 
+@api_router.get("/cache/status")
+async def cache_status():
+    """缓存命中率（管理面板用，用于验证缓存是否生效、命中率高低）"""
+    return cache_stats()
+
+
 @api_router.get("/map")
+@cached(ttl=5)
 async def get_map_data():
     """获取世界地图可视化数据"""
     from ..mapdata import get_map_data
@@ -1102,6 +1128,7 @@ async def raw_import_source(raw_data: RawImportSource):
 
 
 @api_router.get("/sources/health")
+@cached(ttl=5)
 async def get_sources_health():
     """获取数据源健康度报告
     状态语义（修复：原逻辑把 last_status==0 未抓取当健康必要条件，导致正常源全标红）：

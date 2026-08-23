@@ -524,8 +524,10 @@ class Checker:
             })
 
         from ..schema.repository import apply_check_results, get_ranking_stats
+        from ..api.cache import invalidate_all
         stats = apply_check_results(results)
         logger.info(f"测速结果回填完成: 存活 {stats['alive']}，未命中转 inactive {stats['marked_inactive']}")
+        invalidate_all()  # 数据变更后清空读缓存，保证下一批读快照新鲜
         # 将存活/总数/均分并入 result，供趋势接口读取（原只存 total_nodes 导致 trend 全 0）
         try:
             result["alive"] = int(stats.get("alive", 0))

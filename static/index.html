@@ -2068,7 +2068,9 @@
 <script>
 // ===== 全局任务进度轮询 =====
 let _gtShown = new Set();   // 已通知过的完成任务 id
+let _gtTimer = null;
 async function pollGlobalTasks() {
+    let hasActive = false;
     try {
         const d = await (await fetch(`${API}/tasks`)).json();
         const box = document.getElementById('global-tasks');
@@ -2098,6 +2100,10 @@ async function pollGlobalTasks() {
                     </div>`;
         }).join('');
     } catch(e) {}
+    finally {
+        clearTimeout(_gtTimer);
+        _gtTimer = setTimeout(pollGlobalTasks, hasActive ? 2500 : 10000);
+    }
 }
 if (!document.getElementById('gtslide-style')) {
     const st = document.createElement('style'); st.id = 'gtslide-style';
@@ -2105,7 +2111,36 @@ if (!document.getElementById('gtslide-style')) {
     document.head.appendChild(st);
 }
 pollGlobalTasks();
-setInterval(pollGlobalTasks, 2500);
+
+// E4：后端缓存命中率浮标（验证「多命中缓存」效果）
+(function () {
+    const b = document.createElement('button');
+    b.textContent = '⚡缓存';
+    b.style.cssText = 'position:fixed;right:14px;bottom:70px;z-index:999;padding:8px 12px;border-radius:20px;border:1px solid var(--bd,#e2e8f0);background:var(--card,#fff);color:var(--text,#0f172a);font-size:12px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.12);';
+    b.onclick = async () => {
+        try {
+            const d = await (await fetch(`${API}/cache/status`)).json();
+            const hit = d.hit || 0, miss = d.miss || 0;
+            const rate = (hit + miss) ? Math.round(hit / (hit + miss) * 100) : 0;
+            const m = document.createElement('div'); m.className = 'modal'; m.style.display = 'flex';
+            m.innerHTML = `<div class="modal-content" style="max-width:420px;">
+                <div class="modal-header"><h2 class="modal-title">⚡ 后端缓存命中率</h2>
+                    <button class="modal-close" style="background:none;border:0;font-size:24px;color:var(--text-muted,#64748b);cursor:pointer;">&times;</button></div>
+                <p style="font-size:13px;color:var(--text-muted,#64748b);">用于验证「多命中缓存、不命中缓存」目标：读多写少接口已加 3~5s TTL，缓解高频轮询打 SQLite 的成本。</p>
+                <div style="margin:16px 0;"><b>命中率</b> <span style="font-size:24px;font-weight:700;color:#2563eb;">${rate}%</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">
+                    <div style="background:var(--card,#fff);border:1px solid var(--bd,#e2e8f0);border-radius:10px;padding:12px;"><div style="font-size:22px;font-weight:700;">${hit}</div><div style="font-size:11px;color:var(--text-muted,#64748b);">命中</div></div>
+                    <div style="background:var(--card,#fff);border:1px solid var(--bd,#e2e8f0);border-radius:10px;padding:12px;"><div style="font-size:22px;font-weight:700;">${miss}</div><div style="font-size:11px;color:var(--text-muted,#64748b);">未命中</div></div>
+                    <div style="background:var(--card,#fff);border:1px solid var(--bd,#e2e8f0);border-radius:10px;padding:12px;"><div style="font-size:22px;font-weight:700;">${d.size || 0}</div><div style="font-size:11px;color:var(--text-muted,#64748b);">缓存条目</div></div>
+                </div>
+                <div style="margin-top:16px;text-align:right;"><button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button></div></div>`;
+            m.onclick = e => { if (e.target === m) m.remove(); };
+            m.querySelector('.modal-close').onclick = () => m.remove();
+            document.body.appendChild(m);
+        } catch (e) { alert('缓存状态获取失败: ' + e.message); }
+    };
+    document.body.appendChild(b);
+})();
 </script>
 </body>
 </html>
