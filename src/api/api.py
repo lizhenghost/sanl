@@ -356,6 +356,20 @@ async def reimport_single_source(source_id: int):
     return {"status": "ok", "source": source.name, **summary}
 
 
+@api_router.post("/cf/convert")
+async def cf_convert(payload: dict = None):
+    """优选订阅转换（C4）：CF 优质端点 × ws模板节点 → 可用代理节点入库。
+
+    payload: {count=50, isp=None, template_id=None}
+    生成后参与统一测速，合格者经 /sub/{token}/{fmt} 输出为优选订阅链接。
+    """
+    p = payload or {}
+    from ..cfconvert import convert
+    return convert(count=int(p.get("count", 50)),
+                   isp=p.get("isp"),
+                   template_id=p.get("template_id"))
+
+
 @api_router.get("/cf/endpoints")
 async def list_cf_endpoints(
     limit: int = Query(2000, le=20000),

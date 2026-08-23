@@ -1689,7 +1689,31 @@
         let convertBusy = false;
 
         function renderConvert(main) {
+            const savedTab = sessionStorage.getItem('cv_tab') || 'normal';
             main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">🔁 订阅转换</h1>
+                    <button class="btn btn-secondary" onclick="renderConvert(document.getElementById('main-content'))">🔄 重置</button>
+                </div>
+                <div class="flex" style="gap:8px;margin-bottom:16px;">
+                    <button class="btn ${savedTab!=='premium'?'btn-primary':'btn-secondary'}" id="cv-tab-normal" onclick="switchConvertTab('normal')">📮 普通订阅转换</button>
+                    <button class="btn ${savedTab==='premium'?'btn-primary':'btn-secondary'}" id="cv-tab-premium" onclick="switchConvertTab('premium')">⭐ 优选订阅转换</button>
+                </div>
+                <div id="cv-pane"></div>`;
+            switchConvertTab(savedTab, true);
+        }
+
+        function switchConvertTab(tab, silent) {
+            try { sessionStorage.setItem('cv_tab', tab); } catch(e) {}
+            const n = document.getElementById('cv-tab-normal'), p = document.getElementById('cv-tab-premium');
+            if (!n || !p) return;
+            n.className = 'btn ' + (tab === 'normal' ? 'btn-primary' : 'btn-secondary');
+            p.className = 'btn ' + (tab === 'premium' ? 'btn-primary' : 'btn-secondary');
+            if (tab === 'premium') renderPremiumConvert(document.getElementById('cv-pane'));
+            else renderNormalConvert(document.getElementById('cv-pane'));
+        }
+
+        function renderNormalConvert(pane) {
+            pane.innerHTML = `
                 <div class="page-header"><h1 class="page-title">🔁 订阅转换</h1>
                     <button class="btn btn-secondary" onclick="renderConvert(document.getElementById('main-content'))">🔄 重置</button>
                 </div>
@@ -1730,6 +1754,118 @@
                 const saved = sessionStorage.getItem('cv_input');
                 if (saved) document.getElementById('cv-input').value = saved;
             } catch(e) {}
+        }
+
+        // ===== ⭐ 优选订阅转换（转发需求落地：筛选优质IP→再转成订阅） =====
+        function renderPremiumConvert(pane) {
+            pane.innerHTML = `
+                <div class="chart-container" style="margin-bottom:16px;">
+                    <div style="font-weight:600;margin-bottom:6px;">🛰 第一步：生成优选节点</div>
+                    <div class="text-muted" style="font-size:13px;margin-bottom:10px;">
+                        把 CF 优选端点库里的优质 IP 套进池内评分最高的 ws 模板节点，生成可测速的代理节点入库
+                        （source_type=cf-convert）。生成后参与统一测速，合格者自动进入订阅输出。
+                    </div>
+                    <div class="flex" style="align-items:flex-end;">
+                        <div style="width:180px;">
+                            <label class="form-label">数量</label>
+                            <input id="pv-count" type="number" class="form-input" value="100" min="1" max="2000">
+                        </div>
+                        <div style="width:200px;">
+                            <label class="form-label">运营商 <span class="text-muted" style="font-size:11px;">(可选)</span></label>
+                            <select id="pv-isp" class="form-input">
+                                <option value="">全部</option><option value="电信">电信</option>
+                                <option value="联通">联通</option><option value="移动">移动</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" id="pv-gen" onclick="doPremiumGenerate()">⚡ 生成优选节点</button>
+                        <span id="pv-status" class="text-muted" style="align-self:center;"></span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <div style="font-weight:600;margin-bottom:6px;">🔗 第二步：创建优选订阅链接</div>
+                    <div class="text-muted" style="font-size:13px;margin-bottom:10px;">
+                        从节点池按门槛筛选优质节点，聚合为一个订阅链接。链接随时可调参，无需重建。
+                    </div>
+                    <div class="flex" style="align-items:flex-end;flex-wrap:wrap;">
+                        <div style="width:150px;">
+                            <label class="form-label">格式</label>
+                            <select id="pv-fmt" class="form-input">
+                                ${CONVERT_FORMATS.map(f => `<option value="${f.key}">${f.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="width:130px;">
+                            <label class="form-label">最低分数</label>
+                            <input id="pv-minscore" type="number" class="form-input" value="70">
+                        </div>
+                        <div style="width:150px;">
+                            <label class="form-label">最大延迟(ms)</label>
+                            <input id="pv-maxlat" type="number" class="form-input" value="300">
+                        </div>
+                        <div style="width:140px;">
+                            <label class="form-label">国家 <span style="font-size:11px;" class="text-muted">(可选)</span></label>
+                            <input id="pv-country" class="form-input" placeholder="HK,JP">
+                        </div>
+                        <div style="width:140px;">
+                            <label class="form-label">协议 <span style="font-size:11px;" class="text-muted">(可选)</span></label>
+                            <input id="pv-proto" class="form-input" placeholder="vless,vmess">
+                        </div>
+                    </div>
+                    <div class="flex mt-4" style="gap:8px;">
+                        <button class="btn btn-primary" onclick="buildPremiumLink()">🔗 生成链接</button>
+                        <button class="btn btn-secondary" id="pv-copy" onclick="copyText(window._pvLink||'')" style="display:none;">📋 复制</button>
+                    </div>
+                    <div id="pv-link-box" style="margin-top:12px;display:none;">
+                        <div class="token-display" id="pv-link" style="word-break:break-all;"></div>
+                        <div id="pv-qr" class="mt-4" style="background:#fff;padding:8px;width:196px;border-radius:8px;"></div>
+                    </div>
+                </div>`;
+        }
+
+        async function doPremiumGenerate() {
+            if (window._pvBusy) return;
+            window._pvBusy = true;
+            const btn = document.getElementById('pv-gen'), st = document.getElementById('pv-status');
+            btn.disabled = true; btn.innerHTML = '<span class="loading"></span> 生成中…';
+            st.textContent = '正在把 CF 优质端点套入 ws 模板…';
+            try {
+                const r = await fetch(API + '/cf/convert', { method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        count: parseInt(document.getElementById('pv-count').value) || 100,
+                        isp: document.getElementById('pv-isp').value || null }) });
+                const d = await r.json();
+                if (d.ok === false) throw new Error(d.error || '生成失败');
+                showToast(`已生成 ${d.generated} 个优选节点入库`);
+                st.textContent = `✅ 模板 #${(d.template||{}).id} (${(d.template||{}).type}) × ${d.generated} 端点 → 入库成功，等下一轮统一测速后即可订阅`;
+            } catch(e) {
+                showToast('生成失败: ' + e.message, 'error');
+                st.textContent = '';
+            } finally {
+                window._pvBusy = false;
+                btn.disabled = false; btn.innerHTML = '⚡ 生成优选节点';
+            }
+        }
+
+        function buildPremiumLink() {
+            const fmt = document.getElementById('pv-fmt').value;
+            const parts = [`limit=5000`];
+            const ms = document.getElementById('pv-minscore').value;
+            const ml = document.getElementById('pv-maxlat').value;
+            const c = document.getElementById('pv-country').value.trim();
+            const p = document.getElementById('pv-proto').value.trim();
+            if (ms) parts.push(`min_score=${ms}`);
+            if (ml) parts.push(`max_latency=${ml}`);
+            if (c) parts.push(`country=${encodeURIComponent(c)}`);
+            if (p) parts.push(`proto=${encodeURIComponent(p)}`);
+            const link = `${location.origin}/api/nodes/subscribe?fmt=${fmt}&${parts.join('&')}`;
+            window._pvLink = link;
+            document.getElementById('pv-link').textContent = link;
+            document.getElementById('pv-copy').style.display = '';
+            document.getElementById('pv-link-box').style.display = '';
+            const qr = document.getElementById('pv-qr');
+            qr.innerHTML = '';
+            try { new QRCode(qr, { text: link, width: 180, height: 180, colorDark: '#2563eb', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M }); } catch(e) {}
+            showToast('优选订阅链接已生成');
         }
 
         async function doConvert() {

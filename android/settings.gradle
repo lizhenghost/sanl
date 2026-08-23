@@ -1,0 +1,3 @@
+// Sanl 安卓壳应用（自主创新，WebView 壳加载自建面板）
+rootProject.name = "Sanl"
+include(":app")

@@ -225,13 +225,20 @@ class Checker:
             task_manager.update(TASK_ID, phase="running",
                                 detail=f"准备 {len(sources)} 个源订阅（{CHECK_MODES[mode]['label']}）"
                                        + (f"，限前 {max_sources} 个源" if max_sources else ""))
-            await self._update_subs_check_config(sources, mode=mode, overrides=overrides)
 
             import time as _t
             job_start_ts = int(_t.time())
-            logger.info(f"Starting subs-check with {len(sources)} sources ({trigger})")
-            task_manager.update(TASK_ID, detail="subs-check 测试中（拉取/解析/连通性/延迟速度）…")
-            result = await self._run_subs_check()
+
+            # 测速后端可切换：sanl-engine（自研）/ subs-check（外部二进制桥接）
+            backend = str(get_scheduler_config().get("check_backend", "engine")).lower()
+            if backend == "engine":
+                logger.info(f"Starting sanl-engine with {len(sources)} sources ({trigger})")
+                result = await self._run_engine(sources, mode=mode, overrides=overrides)
+            else:
+                await self._update_subs_check_config(sources, mode=mode, overrides=overrides)
+                logger.info(f"Starting subs-check with {len(sources)} sources ({trigger})")
+                task_manager.update(TASK_ID, detail="subs-check 测试中（拉取/解析/连通性/延迟速度）…")
+                result = await self._run_subs_check()
             task_manager.update(TASK_ID, done=1, total=2, detail="入库与评分计算中…")
 
             if result.get("success"):
@@ -273,6 +280,91 @@ class Checker:
             repository.update_check_job(job_id.id, "failed", error=str(e))
             job.update({"status": "failed", "finished_at": time.time(), "error": str(e)})
             return {"status": "error", "job_id": job_id, "error": str(e)}
+
+    async def _run_engine(self, sources: List, mode: str = "speed",
+                          overrides: Optional[Dict] = None) -> Dict:
+        """自研引擎后端：sanl-engine 三级漏斗管线。
+
+        输出与 subs-check 后端同构的 result dict（result_path 指向 clash proxies yaml），
+        复用既有 _parse_and_store_results 回填管道，绝不删库。
+        """
+        import yaml as _yaml
+        from ..engine.pipeline import run_pipeline
+
+        # 与 _update_subs_check_config 相同的源筛选：只喂真实代理订阅
+        urls = [
+            s.url for s in sources
+            if not s.url.startswith('manual://')
+            and not s.url.startswith('data:')
+            and (getattr(s, 'source_type', '') or '').lower() not in ('cf-list', 'static')
+        ]
+        try:
+            manual_count = repository.count_nodes_by_source_type('manual')
+        except Exception:
+            manual_count = 0
+        if manual_count > 0:
+            local_port = get_app_config().get('port', 8899)
+            urls.append(f"http://127.0.0.1:{local_port}/sub/internal/manual")
+
+        ov = {k: v for k, v in (overrides or {}).items() if k != "max_sources"}
+        # 注意：不继承 subs-check 的 concurrent——两者并发语义完全不同
+        # （subs-check 是其内部 goroutine 数；sanl-engine 的 concurrent 是 mihomo 探测通道数，
+        #   实测标定 16×8s 最优，灌入 30+ 会因内核过载误杀 ~30% 存活节点）
+        ov.setdefault("min-speed", CHECK_MODES.get(mode, CHECK_MODES["speed"]).get("min-speed", 128))
+
+        job = self.current_job
+        TASK_ID = "check"
+        from ..utils.taskmgr import task_manager
+
+        def on_progress(phase: str, done: int, total: int, detail: str):
+            # 映射到前端四阶段：拉取订阅→解析去重→连通性测活→入库完成
+            if phase == "fetch":
+                job["phase_idx"] = 0
+                job["subs_total"] = total
+            elif phase == "parse":
+                job["nodes_found"] = job["nodes_deduped"] = total
+                job["phase_idx"] = max(job["phase_idx"], 1)
+            elif phase in ("l1", "probe"):
+                job["phase_idx"] = 2
+            elif phase == "done":
+                job["phase_idx"] = 3
+            line = f"[{phase}] {done}/{total} {detail}".strip()
+            job["log"].append(line)
+            task_manager.update(TASK_ID, phase="running", detail=line)
+
+        result = await run_pipeline(
+            urls, mode=mode, overrides=ov,
+            progress_cb=on_progress,
+            workdir=str(get_app_config().get("engine_workdir", "./output/engine")))
+
+        if not result.ok:
+            return {"success": False, "error": result.error}
+
+        st = result.stats.as_dict()
+        job.update({
+            "subs_total": st["fetched_sources"],
+            "nodes_found": st["parsed_nodes"],
+            "nodes_deduped": st["deduped_nodes"],
+            "nodes_alive": len(result.alive_proxies),
+        })
+
+        out_dir = get_app_config().get("engine_workdir", "./output/engine")
+        os.makedirs(out_dir, exist_ok=True)
+        result_path = os.path.join(out_dir, "all.yaml")
+        with open(result_path, "w", encoding="utf-8") as f:
+            _yaml.safe_dump({"proxies": result.alive_proxies}, f, allow_unicode=True, sort_keys=False)
+
+        logger.info(f"sanl-engine 完成: 候选 {st['deduped_nodes']} → "
+                    f"L1 {st['l1_alive']} → L2 {st['l2_alive']} → 合格 {st['l3_passed']} "
+                    f"耗时 {result.elapsed}s")
+        return {
+            "success": True,
+            "backend": "sanl-engine",
+            "result_path": result_path,
+            "total_nodes": st["deduped_nodes"],
+            "alive": len(result.alive_proxies),
+            "elapsed": result.elapsed,
+        }
 
     async def _update_subs_check_config(self, sources: List, mode: str = "speed",
                                         overrides: Optional[Dict] = None):

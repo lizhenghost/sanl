@@ -18,3 +18,6 @@ logs/
 *.db-wal
 app.log
 SANL_OPT_TODO.md
+
+# 自研引擎的内核二进制（运行时下载，不入库）
+bin/

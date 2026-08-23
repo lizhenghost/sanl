@@ -22,7 +22,7 @@ def load_config(path=None):
             "database": {"path": "./data/nodes.db"},
             "subs_check": {"binary_path": "./subs-check", "config_path": "./config/subs-check.yaml", "output_dir": "./output"},
             "sources": {"github": {"enabled": True, "refresh_interval": 3600}, "telegram": {"enabled": True, "refresh_interval": 7200}},
-            "scheduler": {"fetch_cron": "0 */6 * * *", "check_cron": "30 * * * *", "auto_clean_days": 7}
+            "scheduler": {"fetch_cron": "0 */6 * * *", "check_cron": "30 * * * *", "auto_clean_days": 7, "check_backend": "engine"}
         }
     return _config
 
