@@ -76,3 +76,43 @@
 ### 回归
 - 14 个核心端点（nodes/stats/map/ranking/sources/sources-health/trend/check-history/nodes/tasks/cf-endpoints/cache-status/tokens-stats/convert-formats/openapi）全 200
 - 全改动 `py_compile` 通过，启动无 Traceback，scheduler 4 个任务正常注册
+
+## 他人 bug 报告核实与修复（commit 84495a4，推至 main）
+
+对 `sanl_bug_report.md` 逐条「实测核实」而非盲信，共 3 项真实修复 + 4 项判定为误报/设计。
+
+### ✅ 真实修复（3 项）
+1. **SPA 路由 fallback**（`src/api/api.py`）
+   - 问题：地址栏直接输入/刷新 `/nodes`、`/dashboard`、`/cf`、`/tokens`、`/speedtest`、`/convert` 返回 404 空白。
+   - 修复：新增 `@app.get("/{full_path:path}")` 兜底路由，凡未命中 `/api`、`/sub`、`/static`、`/vendor`、`/openapi.json`、`/docs`、`/sw.js`、`/manifest`、`/favicon.ico` 的 GET 一律返回单页 `index.html`，由前端 JS 接管渲染。
+   - 实测：以上路径全部 200（加载前端）；`/api/nodes/stats`、`/static/index.html`、`/sw.js`、`/openapi.json`、`/api/cache/status` 均不被 fallback 拦截（仍各自 200）。
+
+2. **PWA 安卓端更新机制**（`static/sw.js`）
+   - 问题：SW 用 cache-first（`sanl-v1`），安卓已安装的 PWA 会一直拿到旧版前端（缓存浮标/自适应轮询等改动看不到）。
+   - 修复：`CACHE` 升版 `sanl-v1` → `sanl-v2`（activate 时删除旧缓存重建，强制拉新）；导航请求 `mode==='navigate'` 改 network-first（失败回退缓存），保证每次打开首页优先网络拿最新。
+   - 影响：安卓端用户下次打开 PWA 会自动更新到最新前端。
+
+3. **node_data JSON 容错解析**（`src/schema/repository.py`）
+   - 问题：`list_nodes`/`list_nodes_missing_geo` 等 5 处 `json.loads(node_data)` 无 try，若 DB 中任一条 node_data 为空/坏 JSON，会导致整个节点列表接口 500。
+   - 修复：新增 `_parse_node_data()`（None/非 dict/坏 JSON 均安全回退空 dict），统一替换 5 处调用；任一条坏数据不再拖垮列表接口。
+
+### ⚪ 判定为误报 / 设计（不改动）
+| 报告结论 | 核实结果 |
+|---|---|
+| 静态资源缺失 `main.js`/`app.js`/`style.css` | **误报**：前端为单页 `index.html`（JS/CSS 全内联），`static/` 只有 `index.html`+`worldmap.js`+`manifest`+`sw.js`，无上述文件是设计 |
+| API 端点 75% 缺失 | **误报**：OpenAPI 实际 58 个端点；报告列的 `/api/pools`、`/api/config`、`/api/subscribe`、`/api/speedtest` 等命名在项目里并不存在 |
+| `/api/convert`、`/api/cf/scan` 405 | **误报**：这两个本就是 POST 端点（报告用 GET 测导致 `405 Method Not Allowed`，属正常） |
+| 节点 `subscribe_url`/`node_data`/`created_at` 缺失 | **安全设计**：`/api/nodes` 刻意只暴露展示字段，**不返回** `node_data`（含 password，防泄漏）与 `subscribe_url`；`Node` 模型将其默认成空串。DB 实测 8803 条全部完整（`subscribe_url`/`node_data`/`created_at`/`updated_at` 均非空，node_data 为合法 JSON） |
+
+### ⚠️ 一项确认的外部限制（非本项目 bug）
+- **`latency` 全为 NULL**：all.yaml 节点名为 `🇺🇸US_1|400KB/s`（仅国家+速度），**subs-check 命名模板不含延迟**（外部二进制）；节点条目本身也无 latency 字段 → 无法从 subs-check 输出可靠提取延迟。
+- 已确认不造成伤害：`apply_qualified_latency` 只对 `latency IS NOT NULL` 判定，latency=NULL 的节点不会被误标 inactive（否则 active 不会保持在 645）。
+- 节点质量已由 `download_speed`（645/645 全有值）充分评估，**不影响订阅生成与节点工作**。不引入伪造延迟。
+
+### 前端交互核实
+- `pollGlobalTasks`/`refreshSidebarStats`/`renderNodes`/`renderMap`/`loadSources`/`subscribe`/`echarts` 等关键逻辑均在 `index.html` 内联，页面非空壳；`/manifest.webmanifest`、`/vendors/echarts.min.js`、`/vendor/qrcode.min.js`、`/static/icons/*` 全部 200。
+- 结论：报告称「交互功能无法工作」为**误报**（其因 `main.js`/`app.js` 404 直接推断而未实际加载页面）。
+
+### 回归
+- 13 个核心端点全 200：`/api/nodes/stats`、`/api/map`、`/api/ranking`、`/api/sources`、`/api/sources/health`、`/api/stats/trend`、`/api/check/history`、`/api/nodes`、`/api/cf/endpoints`、`/api/cache/status`、`/api/convert/formats`、`/sw.js`、`/nodes`。
+- `py_compile` 通过；`node --check static/sw.js` 通过；后端重启正常（PID 18197）。
