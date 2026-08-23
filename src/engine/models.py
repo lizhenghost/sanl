@@ -26,6 +26,7 @@ class StageStats:
     parsed_nodes: int = 0
     deduped_nodes: int = 0
     l1_alive: int = 0
+    l15_alive: int = 0
     l2_alive: int = 0
     l3_passed: int = 0
 
@@ -35,6 +36,7 @@ class StageStats:
             parsed_nodes=self.parsed_nodes,
             deduped_nodes=self.deduped_nodes,
             l1_alive=self.l1_alive,
+            l15_alive=self.l15_alive,
             l2_alive=self.l2_alive,
             l3_passed=self.l3_passed,
         )

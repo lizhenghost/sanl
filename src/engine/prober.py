@@ -15,19 +15,24 @@ from .models import Candidate
 
 logger = logging.getLogger(__name__)
 
-# 204 探测端点（多备选，逐个尝试）
+# 204 探测端点（多备选，逐个尝试，覆盖不同地区可达性）
 _ALIVE_URLS = [
-    "http://www.gstatic.com/generate_204",
-    "http://cp.cloudflare.com/generate_204",
-    "http://connectivitycheck.platform.hicloud.com/generate_204",
+    "http://connectivitycheck.platform.hicloud.com/generate_204",  # 华为，国内友好
+    "http://cp.cloudflare.com/generate_204",                       # Cloudflare
+    "http://www.gstatic.com/generate_204",                         # Google
+    "http://www.apple.com/go",                                     # Apple，多地区可达
+    "http://detectportal.firefox.com/success.txt",                 # Firefox
+    "http://myip.ipip.net",                                        # 国内可达
 ]
 
 
 async def _http_probe(proxy_url: str, timeout: float) -> Optional[int]:
     """经 proxy_url 发 204 探测，返回应用层延迟 ms；全失败返回 None。"""
     last_err = None
-    async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout) as c:
-        for url in _ALIVE_URLS[:2]:
+    # 每个 URL 独立短超时（3s），总超时不超过参数 timeout
+    per_url = min(3.0, timeout / max(1, len(_ALIVE_URLS)))
+    async with httpx.AsyncClient(proxy=proxy_url, timeout=per_url) as c:
+        for url in _ALIVE_URLS:
             t0 = time.monotonic()
             try:
                 r = await c.get(url)

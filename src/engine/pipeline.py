@@ -118,6 +118,44 @@ async def run_pipeline(source_urls: List[str], *,
         logger.info(f"[engine] L1 漏斗: 候选 {len(candidates)} → TCP 存活 {len(alive_l1)} "
                     f"({len(alive_l1)/max(1,len(candidates))*100:.1f}%) 超时 {timeout_ms/1000}s")
 
+        # ---------- 3.5. L1.5 TLS 预检查（vless/vmess/trojan with tls:true） ----------
+        # 免费源大量 TLS 节点实际服务器挂了或不说 TLS，直接进 mihomo 占满通道后全部失败。
+        # L1.5 在进内核前做快速 TLS hello 过滤，只保留能完成握手的节点。
+        from .tlspreflight import tls_precheck_batch
+        tls_nodes = []
+        non_tls = []
+        for c in alive_l1:
+            p = c.proxy
+            t = str(p.get("type", "")).lower()
+            if t in ("vless", "vmess", "trojan", "hysteria", "hysteria2") and p.get("tls") is True:
+                sni = p.get("sni") or p.get("servername") or p.get("server")
+                tls_nodes.append((p.get("server"), int(p.get("port", 443)), sni, c))
+            else:
+                non_tls.append(c)
+
+        l15_start = len(tls_nodes)
+        if tls_nodes:
+            prog("l15", 0, len(tls_nodes),
+                 f"TLS 预检查 {len(tls_nodes)} 个 TLS 节点")
+            tls_server_port_sni = [(s, p, sni) for s, p, sni, _ in tls_nodes]
+            passed = await tls_precheck_batch(
+                tls_server_port_sni,
+                timeout=3.0,
+                progress_cb=lambda d, t: prog("l15", d, t))
+            passed_set = {(s, p, sni) for s, p, sni in passed}
+            tls_passed = [c for s, p, sni, c in tls_nodes if (s, p, sni) in passed_set]
+            tls_failed = len(tls_nodes) - len(tls_passed)
+            logger.info(f"[engine] L1.5 TLS 预检查: {len(tls_nodes)} 个 TLS 节点 → 通过 {len(tls_passed)} "
+                        f"({len(tls_passed)/max(1,len(tls_nodes))*100:.1f}%) 失败 {tls_failed}")
+            prog("l15", len(tls_nodes), len(tls_nodes),
+                 f"TLS 通过 {len(tls_passed)} / 失败 {tls_failed}")
+        else:
+            tls_passed = []
+
+        # 合并：非 TLS 节点 + TLS 预检通过节点
+        alive_l1 = non_tls + tls_passed
+        stats.l15_alive = len(alive_l1)
+
         # ---------- 4. L2/L3 内核探测 ----------
         # 实测标定：30通道×5s 会把 30% 的活节点挤死（并发过载+超时不足，
         # 重测实验 60 判死节点低并发长超时救回 18 个，含 135ms 优质节点）。

@@ -107,9 +107,9 @@ class KernelManager:
                 if cipher not in ("auto", "none", "aes-128-gcm", "aes-256-gcm",
                                   "chacha20-poly1305", "chacha20", "aes-128-cfb",
                                   "zero", "aes-256-cfb", "aes-192-cfb"):
-                    p["cipher"] = "auto"   # 空/未知 security 一律 auto
+                    p["cipher"] = "auto"
                 if not str(p.get("uuid") or "").strip():
-                    continue               # vmess 无 uuid 无法工作
+                    continue
             elif t in ("vless", "tuic") and not str(p.get("uuid") or "").strip():
                 continue
             elif t == "trojan" and not str(p.get("password") or "").strip():
@@ -117,9 +117,14 @@ class KernelManager:
             elif t in ("ss", "ssr"):
                 if not str(p.get("cipher") or p.get("security") or "").strip():
                     continue
+            elif t == "http":
+                # http 代理节点验证：必须至少有一个标识字段非空，否则视为 CF 端点误导入
+                if not (p.get("username") or p.get("password") or p.get("uuid")
+                        or p.get("cipher")):
+                    continue
             name = str(p.get("name") or "")
             if not name or name in seen:
-                continue  # 管线层已按指纹去重；此处仅防御同名冲突（保留首个）
+                continue
             seen.add(name)
             out.append(p)
         return out
