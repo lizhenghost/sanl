@@ -116,3 +116,37 @@
 ### 回归
 - 13 个核心端点全 200：`/api/nodes/stats`、`/api/map`、`/api/ranking`、`/api/sources`、`/api/sources/health`、`/api/stats/trend`、`/api/check/history`、`/api/nodes`、`/api/cf/endpoints`、`/api/cache/status`、`/api/convert/formats`、`/sw.js`、`/nodes`。
 - `py_compile` 通过；`node --check static/sw.js` 通过；后端重启正常（PID 18197）。
+
+## 节点统计失真修复（commit dec75f7，推至 main）
+
+用户反馈"3万节点只有600可用、总节点显示700多"。逐环节实测排查，根因 + 修复如下。
+
+### 数据链路实测（subs-check 日志）
+```
+源报告节点数 ~3万(含CF列表+跨源重复)
+  → subs-check 实际拉取 21515
+  → 去重后 8034
+  → 测活存活 1085        ← 免费聚合池真实死亡率 ~86%
+  → 过测速(min-speed) 可用 633→750   ← 免费池客观水平
+```
+
+### 根因：unknown 状态永不降级（统计失真元凶）
+`mark_missing_inactive` 的 `WHERE status IN ('active')` **漏掉 unknown**——入库后从未存活的节点每轮被 subs-check 测过（死亡不在 all.yaml），但永远停在 unknown、fail_count 永不累计、永不进黑名单。曾积累 **unknown=7417 占全池 84%**。
+
+### ✅ 修复清单（commit dec75f7）
+1. **状态机修复**：`mark_missing_inactive` 纳入 unknown；fail_count 统一 +1；连续 3 轮失败 → dead 黑名单。
+2. **stats 新口径**：`total` = active+inactive+unknown（有效池，不含黑名单）；新增 `pool_total`（物理总数）与 `dead` 字段。
+3. **清理死链源**：禁用 10 个已验证 404 的 discover 源（zhuhaiuk/junjun266/littlebais/Au1rxx 全 URL）+ 禁用 #13（V2RayAggregator Clash 格式，与 #4 完全重复）。
+4. **新增可用源**（均实测 200）：mahdibland Eternity.txt（精品筛选线）/ mfuu/v2ray / Epodonios trojan.txt。
+5. **min-speed 256→128**：存活但中速的节点也算可用（免费池稀缺，128KB/s 满足基础代理）。
+
+### 效果（修复后首轮测速实测）
+- unknown: **7417 → 0**，全部正确归类 inactive
+- 可用: **633 → 750**（+18%）
+- 统计口径：total=8882 / active=709 / inactive=8173 / dead=0（dead 将随 fail_count 累计逐步产生）
+- 订阅输出回归：/sub/{token}/clash 1.38MB、base64 1.07MB、txt 800KB 全 200
+
+### 关于"3万多个节点"的口径解释
+- 3万+ = 各源页面 node_count 原始总和（含 CF IP 列表类源 + 跨源重复 + 同仓库多格式）
+- cf_endpoints 表 2.9 万是 CF 优选 IP（无协议密码，非代理节点，独立管理层）
+- 真实去重代理节点 8871 个；免费聚合池能存活的比例就是 ~13%，这是所有免费订阅 aggregator 的客观水平
