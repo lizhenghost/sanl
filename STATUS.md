@@ -2,9 +2,39 @@
 
 > 原 NodePool 已全项目改名 **Sanl**（品牌名），仓库 github.com/lizhenghost/sanl，本地目录 node-pool → sanl
 
+## 架构决策：两条腿走路（2026-08-23）
+
+### 结论
+- **主力节点源**：`subs-check`（外部二进制桥接），默认 `check_backend: subs-check`，每小时自动运行，750+ 节点
+- **自研引擎 sanl-engine**：可选增量发现模式，API `POST /api/check/run` + `overrides: {"check_backend": "engine"}` 手动触发
+- **sanl 核心价值**：多维评分 / 优选订阅转换 / 流量限额 / 黑名单 / 地图可视化 / CF 优选库
+
+### 实测数据支撑
+| 指标 | subs-check | sanl-engine | 结论 |
+|---|---|---|---|
+| 存活节点 | 750 | 19（最优 53） | subs-check 完胜，引擎 L2 存活率仅 0.76% |
+| 内核准确率 | 黑盒 | 98%（B9 抽 250/245） | 引擎内核没问题，瓶颈在免费源质量 |
+| 协议覆盖 | 全协议 | ss/vless/trojan/vmess | subs-check 更全 |
+| 可定制性 | ❌ 黑盒 | ✅ Python 全掌握 | sanl 完胜 |
+| 许可证 | GPL-3.0（传染） | MIT | sanl 完胜 |
+
+### 管线漏斗（sanl-engine 最新一轮）
+1. 解析 → 7738 候选
+2. L1 TCP → 3643（47.1%）
+3. L1.5 TLS 预检查 → 1797/2478 通过（72.5%）
+4. L2 mihomo 探测 → 17/2499（**0.68%**）← 瓶颈，无法通过代码优化
+5. L3 速度 → 16
+
+### 为什么引擎 L2 存活率这么低
+- 免费源大量节点在中国，连不到 cachefly/gstatic
+- mihomo 内核要求代理能完整走完 HTTP 请求到探测 URL
+- subs-check 用更宽松的探测机制，覆盖了更多边缘节点
+- **0.76% 的存活率是免费源质量决定的，不是代码能改的**
+
 ## 当前运行态
 - **服务**: `python3 main.py`，PID `pgrep -f "python3 main.py"`，端口 8899，日志 `app.log`，DB `data/nodes.db`
-- **最新动态**: 本地 commit `48a86a0`（已推 GitHub），job 105 完成：active **12→44**（+3.7×），协议 ss:27/vless:11/trojan:3/vmess:2/http:1，候选 7629/存活 53/评分 51.6
+- **最新配置**: `check_backend: subs-check`（默认），引擎可通过 `overrides` 切换
+- **GitHub**: `8d8bba5`（L1.5 TLS 预检查 + 多 probe URL）
 
 ## 本次修复清单（2026-08-23，用户逐项反馈）
 1. ❌→✅ **Token 全部 500（最大痛点）**

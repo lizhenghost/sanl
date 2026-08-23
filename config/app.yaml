@@ -10,7 +10,7 @@ database:
   path: ./data/nodes.db
 scheduler:
   auto_clean_days: 7
-  check_backend: engine
+  check_backend: subs-check
   check_cron: 0 * * * *
   check_mode: speed
   fetch_cron: 0 * * * *
