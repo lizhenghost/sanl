@@ -62,7 +62,8 @@ async def get_official_ranges(ip_type: int = 4) -> List[str]:
     """CF 官方 IP 段（本地缓存 1 小时）"""
     if os.path.exists(IPS_CACHE):
         try:
-            cache = json.load(open(IPS_CACHE))
+            with open(IPS_CACHE) as f:
+                cache = json.load(f)
             if time.time() - cache.get("ts", 0) < CACHE_TTL and cache.get(str(ip_type)):
                 return cache[str(ip_type)]
         except Exception:
@@ -71,12 +72,14 @@ async def get_official_ranges(ip_type: int = 4) -> List[str]:
     txt = await asyncio.to_thread(_http_get_sync, url, 15)
     ranges = [l.strip() for l in txt.splitlines() if l.strip() and "/" in l]
     try:
-        cache = json.load(open(IPS_CACHE)) if os.path.exists(IPS_CACHE) else {}
+        with open(IPS_CACHE) as f:
+            cache = json.load(f) if os.path.exists(IPS_CACHE) else {}
     except Exception:
         cache = {}
     cache.update({str(ip_type): ranges, "ts": time.time()})
     os.makedirs("data", exist_ok=True)
-    json.dump(cache, open(IPS_CACHE, "w"))
+    with open(IPS_CACHE, "w") as f:
+        json.dump(cache, f)
     return ranges
 
 

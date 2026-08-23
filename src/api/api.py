@@ -20,6 +20,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 scheduler = None
+_STARTED_AT = __import__("time").time()
+app_config = get_app_config()
 
 
 @asynccontextmanager
@@ -54,6 +56,20 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url="/openapi.json",
+    )
+
+    # Gzip 压缩：API JSON 响应 + 静态文件传输量减半
+    from fastapi.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    # CORS：允许 PWA / 跨域订阅访问
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["*"],
+        expose_headers=["X-Cache", "ETag", "Cache-Control"],
     )
 
     # 挂载本地化 API 文档页
@@ -519,40 +535,67 @@ async def list_nodes(
     return result
 
 
+@api_router.get("/health", include_in_schema=False)
+async def health_check():
+    """轻量健康检查（不访问数据库）—— 供 nginx/负载均衡/监控探针使用"""
+    import time as _time
+    return {
+        "status": "ok",
+        "version": app_config.get("version", "unknown"),
+        "uptime_seconds": int(_time.time() - _STARTED_AT),
+        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+    }
+
+
+@api_router.get("/health/db")
+@cached(ttl=1)
+async def health_db():
+    """数据库连通性检查（低频率，缓存 1s）"""
+    try:
+        with repository.get_connection() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        return {"status": "ok", "db": "sqlite", "total_nodes": total}
+    except Exception as e:
+        return {"status": "error", "db": "sqlite", "error": str(e)}
+
+
 @api_router.get("/nodes/stats")
 @cached(ttl=5)
 async def node_stats():
-    """获取节点统计
-    口径说明（修复"总节点虚高/失真"）：
-    - total = active + inactive + unknown（有效池，不含黑名单 dead）
-    - dead 单独返回：连续 3 轮测速失败自动黑名单的节点，不参与订阅与统计
+    """获取节点统计（优化：单次 GROUP BY 查询替代 5 次 COUNT）
+    口径说明：
+    - total = active + inactive + unknown（有效池，不含 dead 黑名单）
+    - dead 单独返回：连续 3 轮测速失败自动黑名单的节点
     """
-    total = repository.count_nodes()
-    active = repository.count_nodes(status=models.NodeStatus.ACTIVE.value)
-    inactive = repository.count_nodes(status=models.NodeStatus.INACTIVE.value)
-    unknown = repository.count_nodes(status=models.NodeStatus.UNKNOWN.value)
-    dead = repository.count_nodes(status=models.NodeStatus.DEAD.value)
-
-    # 按国家统计
-    countries = {}
     with repository.get_connection() as conn:
+        # 一次查询获取所有状态的计数 + 总数
         rows = conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM nodes GROUP BY status"
+        ).fetchall()
+        status_map = {r[0]: r[1] for r in rows}
+        total = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+
+        # 按国家统计（仅 active）
+        country_rows = conn.execute(
             "SELECT country, COUNT(*) as cnt FROM nodes WHERE status = ? GROUP BY country ORDER BY cnt DESC LIMIT 20",
             (models.NodeStatus.ACTIVE.value,)
         ).fetchall()
-        for r in rows:
-            if r[0]:
-                countries[r[0]] = r[1]
+        countries = {r[0]: r[1] for r in country_rows if r[0]}
 
-    return {
-        "total": active + inactive + unknown,   # 有效池（不含 dead 黑名单）
-        "pool_total": total,                     # 全表物理总数（含 dead，供审计）
-        "active": active,
-        "inactive": inactive,
-        "unknown": unknown,
-        "dead": dead,
-        "countries": countries
-    }
+        active = status_map.get(models.NodeStatus.ACTIVE.value, 0)
+        inactive = status_map.get(models.NodeStatus.INACTIVE.value, 0)
+        unknown = status_map.get(models.NodeStatus.UNKNOWN.value, 0)
+        dead = status_map.get(models.NodeStatus.DEAD.value, 0)
+
+        return {
+            "total": active + inactive + unknown,
+            "pool_total": total,
+            "active": active,
+            "inactive": inactive,
+            "unknown": unknown,
+            "dead": dead,
+            "countries": countries
+        }
 
 
 @api_router.get("/nodes/subscribe")
