@@ -554,7 +554,8 @@ def parse_content(content: str, cf_as_nodes: bool = True) -> dict:
         except Exception as e:
             errors.append(f"sing-box JSON 解析失败: {e}")
 
-    # 1) Clash YAML（含 proxies 键）    if "proxies:" in content:
+    # 1) Clash YAML（含 proxies 键）
+    if "proxies:" in content:
         try:
             doc = yaml.safe_load(content)
             if isinstance(doc, dict) and doc.get("proxies"):

@@ -98,11 +98,14 @@ def _parse_part(text: str, errors: List[str], label: str = "") -> List[Tuple[str
 async def _collect_input(raw: str, errors: List[str]) -> Tuple[List[Tuple[str, dict, str]], int]:
     """拉取输入中的 http(s) 订阅并逐源独立解析；非 URL 内容合并为一块解析。
     返回 (全部节点, 成功拉取的订阅数) —— 每源格式隔离，避免 base64 与 yaml 互相污染"""
-    lines = [l.strip() for l in re.split(r"[\n|]+", raw) if l.strip()]
+    lines = re.split(r"\n+", raw)
     urls, inline_parts = [], []
     for line in lines:
-        if URL_RE.match(line) and "\n" not in line and len(line) < 2048:
-            urls.append(line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if URL_RE.match(stripped) and "\n" not in stripped and len(stripped) < 2048:
+            urls.append(stripped)
         else:
             inline_parts.append(line)
 
