@@ -7,7 +7,7 @@ filter: []
 listen-port: :8199
 media-check: false
 media-concurrent: 20
-min-speed: 256
+min-speed: 128
 node-prefix: ''
 output-dir: ./output
 print-progress: false
@@ -19,9 +19,11 @@ source:
 speed-concurrent: 100
 speed-test-url: http://cachefly.cachefly.net/10mb.test
 sub-urls:
-- https://raw.githubusercontent.com/zhuhaiuk/free-nodes/main/README.md
-- https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/README.md
-- https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt
+- https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity.txt
+- https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
+- https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/trojan.txt
+- https://raw.githubusercontent.com/awesome-vpn/awesome-vpn/master/clash.yaml
+- https://raw.githubusercontent.com/awesome-vpn/awesome-vpn/master/sub/mix
 - https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt
 - https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt
 - https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt

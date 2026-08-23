@@ -51,7 +51,7 @@ CHECK_MODES = {
         "rename-node": True,
         "download-timeout": 6,
         "download-mb": 1,
-        "min-speed": 256,
+        "min-speed": 128,   # 256→128：存活但中速的节点也算可用（免费池本就稀缺，128KB/s 可满足基础代理）
     },
     "full": {
         "label": "全量(含流媒体)",
@@ -59,7 +59,7 @@ CHECK_MODES = {
         "rename-node": True,
         "download-timeout": 6,
         "download-mb": 1,
-        "min-speed": 256,
+        "min-speed": 128,
     },
 }
 # 允许通过 API 覆盖的 subs-check 参数白名单

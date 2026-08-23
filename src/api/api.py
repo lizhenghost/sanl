@@ -506,12 +506,17 @@ async def list_nodes(
 @api_router.get("/nodes/stats")
 @cached(ttl=5)
 async def node_stats():
-    """获取节点统计"""
+    """获取节点统计
+    口径说明（修复"总节点虚高/失真"）：
+    - total = active + inactive + unknown（有效池，不含黑名单 dead）
+    - dead 单独返回：连续 3 轮测速失败自动黑名单的节点，不参与订阅与统计
+    """
     total = repository.count_nodes()
     active = repository.count_nodes(status=models.NodeStatus.ACTIVE.value)
     inactive = repository.count_nodes(status=models.NodeStatus.INACTIVE.value)
     unknown = repository.count_nodes(status=models.NodeStatus.UNKNOWN.value)
-    
+    dead = repository.count_nodes(status=models.NodeStatus.DEAD.value)
+
     # 按国家统计
     countries = {}
     with repository.get_connection() as conn:
@@ -522,12 +527,14 @@ async def node_stats():
         for r in rows:
             if r[0]:
                 countries[r[0]] = r[1]
-    
+
     return {
-        "total": total,
+        "total": active + inactive + unknown,   # 有效池（不含 dead 黑名单）
+        "pool_total": total,                     # 全表物理总数（含 dead，供审计）
         "active": active,
         "inactive": inactive,
         "unknown": unknown,
+        "dead": dead,
         "countries": countries
     }
 

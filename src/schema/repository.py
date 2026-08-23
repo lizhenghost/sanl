@@ -222,11 +222,13 @@ def mark_missing_inactive(active_fps: set, include_manual: bool = False):
         " AND (source_id IS NULL OR source_id NOT IN (SELECT id FROM sources WHERE source_type = 'manual'))"
     now = int(__import__('time').time())
     with get_connection() as conn:
+        # 关键修复：unknown（入库后从未存活）也必须降级——否则测过的死节点永远停在 unknown，
+        # 统计失真（曾出现 unknown=7417 占全池 84% 的失真状态），fail_count 也永不累计
         cur = conn.execute(
             f"""UPDATE nodes SET status = 'inactive',
-                   fail_count = CASE WHEN status = 'active' THEN fail_count + 1 ELSE fail_count END,
+                   fail_count = fail_count + 1,
                    updated_at = ?
-                WHERE status IN ('active') AND fingerprint NOT IN ({placeholders}){manual_filter}""",
+                WHERE status IN ('active', 'unknown') AND fingerprint NOT IN ({placeholders}){manual_filter}""",
             [now] + fps
         )
         n = cur.rowcount
