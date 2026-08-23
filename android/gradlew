@@ -1,0 +1,22 @@
+#!/bin/sh
+# Gradle wrapper
+GRADLE_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
+DIST_URL="https://services.gradle.org/distributions/gradle-8.7-bin.zip"
+DIST_DIR="$GRADLE_HOME/wrapper/dists/gradle-8.7-bin"
+DIST_ZIP="$DIST_DIR/gradle-8.7-bin.zip"
+EXTRACT_DIR="$DIST_DIR/gradle-8.7"
+
+if [ ! -x "$EXTRACT_DIR/bin/gradle" ]; then
+    mkdir -p "$DIST_DIR"
+    if [ ! -f "$DIST_ZIP" ]; then
+        echo "Downloading Gradle..."
+        curl -sL -o "$DIST_ZIP" "$DIST_URL"
+    fi
+    echo "Extracting Gradle..."
+    mkdir -p "$DIST_DIR/extract"
+    unzip -q "$DIST_ZIP" -d "$DIST_DIR/extract"
+    mv "$DIST_DIR/extract/gradle-8.7" "$EXTRACT_DIR"
+    rm -rf "$DIST_DIR/extract"
+fi
+
+exec "$EXTRACT_DIR/bin/gradle" "$@"

@@ -24,7 +24,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String DEFAULT_URL = "https://lzsanlzhuanhuan.kdns.fr";
     private WebView web;
-    private SwipeRefresh refresh;
+    private SwipeRefreshLayout refresh;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override

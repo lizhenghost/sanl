@@ -21,3 +21,10 @@ SANL_OPT_TODO.md
 
 # 自研引擎的内核二进制（运行时下载，不入库）
 bin/
+
+# Android 构建产物
+android/.gradle/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/config.json
+*.apk

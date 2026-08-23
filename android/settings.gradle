@@ -1,3 +1,18 @@
 // Sanl 安卓壳应用（自主创新，WebView 壳加载自建面板）
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
 rootProject.name = "Sanl"
 include(":app")
