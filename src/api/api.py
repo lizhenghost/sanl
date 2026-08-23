@@ -91,6 +91,8 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api")
     from .converter import router as convert_router
     app.include_router(convert_router, prefix="/api", tags=["converter"])
+    from .edgetunnel import router as edgetunnel_router
+    app.include_router(edgetunnel_router, prefix="/api/edgetunnel", tags=["edgetunnel"])
     app.include_router(sub_router, prefix="/sub", tags=["subscription"])
 
     # 缓存失效：任何非只读请求（POST/PUT/DELETE）完成后清空读缓存。

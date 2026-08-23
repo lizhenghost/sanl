@@ -185,6 +185,7 @@
                 <div class="nav-item" data-page="cfscan">🔍 网段扫描</div>
                 <div class="nav-group">🔁 转换工具</div>
                 <div class="nav-item" data-page="convert">🔄 订阅转换</div>
+                <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
             </nav>
             <div class="sidebar-footer">
                 <div id="last-check">最近检查: --</div>
@@ -241,6 +242,7 @@
                 case 'cfscan': renderCfScan(main); break;
                 case 'check': renderCheck(main); break;
                 case 'convert': renderConvert(main); break;
+                case 'cfworker': renderCfWorker(main); break;
                 case 'subscribe': renderSubscribe(main); break;
                 case 'tokens': renderTokens(main); break;
             }
@@ -2198,6 +2200,7 @@
     <div data-page="subscribe" onclick="btGo(this)">📥<span i18n="subscribe_out">输出</span></div>
     <div data-page="cfendpoints" onclick="btGo(this)">🌐<span i18n="cfendpoints">优选</span></div>
     <div data-page="convert" onclick="btGo(this)">🔄<span i18n="convert">转换</span></div>
+    <div data-page="cfworker" onclick="btGo(this)">🚀<span i18n="cfworker">Worker</span></div>
 </nav>
 <!-- 全局任务进度条（抓取/测速等后台任务实时视图） -->
 <div id="global-tasks" style="position:fixed;top:0;left:0;right:0;z-index:9999;pointer-events:none;"></div>
@@ -2277,6 +2280,130 @@ pollGlobalTasks();
     };
     document.body.appendChild(b);
 })();
+
+// ===== 🚀 CF Worker 部署 =====
+function renderCfWorker(main) {
+    main.innerHTML = `
+        <div style="padding:24px;max-width:900px;">
+            <div class="page-header"><h1 class="page-title">🚀 CF Worker 部署</h1>
+                <span style="font-size:13px;color:var(--text-muted);">学习 edgetunnel：零二进制、边缘中继、一键部署</span>
+            </div>
+            <div style="background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <h3 style="margin:0 0 12px;font-size:16px;">📋 说明</h3>
+                <p style="margin:0;color:var(--text-muted);font-size:14px;line-height:1.6;">
+                    从节点池选取优质 vless/vmess+ws 节点，生成可直接部署到
+                    <a href="https://workers.cloudflare.com" target="_blank" style="color:var(--primary);">Cloudflare Workers</a>
+                    的 JS 脚本。部署后获得一个边缘 V2Ray 中继。参考
+                    <a href="https://github.com/zizifn/edgetunnel" target="_blank" style="color:var(--primary);">edgetunnel</a> 方案。
+                </p>
+            </div>
+            <div style="background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <h3 style="margin:0 0 16px;font-size:16px;">⚙️ 生成配置</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div><label style="font-size:13px;color:var(--text-muted);">参考节点数</label><input type="number" id="cw-nodes" class="form-input" value="20" min="1" max="100" style="width:100%;"></div>
+                    <div><label style="font-size:13px;color:var(--text-muted);">UUID (留空随机)</label><input type="text" id="cw-uuid" class="form-input" placeholder="auto" style="width:100%;"></div>
+                    <div><label style="font-size:13px;color:var(--text-muted);">故障转移 IP (可选)</label><input type="text" id="cw-proxy-ip" class="form-input" placeholder="empty" style="width:100%;"></div>
+                    <div><label style="font-size:13px;color:var(--text-muted);">最大通道数</label><input type="number" id="cw-channels" class="form-input" value="100" min="10" max="500" style="width:100%;"></div>
+                </div>
+                <div style="margin-top:16px;display:flex;gap:10px;">
+                    <button class="btn btn-primary" onclick="generateWorker()">🚀 生成 Worker 脚本</button>
+                    <button class="btn btn-secondary" onclick="loadExample()">📖 查看示例</button>
+                </div>
+            </div>
+            <div id="cw-result" style="display:none;background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <h3 style="margin:0 0 12px;font-size:16px;">📄 Worker 脚本</h3>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-sm btn-secondary" onclick="copyWorkerScript()">📋 复制脚本</button>
+                    <button class="btn btn-sm btn-secondary" onclick="downloadWorkerScript()">⬇️ 下载 .js</button>
+                </div>
+                <textarea id="cw-script" style="width:100%;height:360px;font-family:monospace;font-size:12px;padding:12px;border:1px solid var(--border,#e2e8f0);border-radius:8px;resize:vertical;background:#1e293b;color:#e2e8f0;"></textarea>
+            </div>
+            <div id="cw-config" style="display:none;background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <h3 style="margin:0 0 12px;font-size:16px;">🔗 配置链接</h3>
+                <div style="display:flex;gap:8px;margin-bottom:12px;"><button class="btn btn-sm btn-secondary" onclick="copyConfigLink()">📋 复制链接</button></div>
+                <input id="cw-config-link" class="form-input" readonly style="width:100%;font-family:monospace;font-size:12px;">
+                <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">把 YOUR_WORKER_HOST 替换为你的 CF Worker 地址（如 xxx.workers.dev）</p>
+            </div>
+            <div id="cw-nodes-list" style="display:none;background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <h3 style="margin:0 0 12px;font-size:16px;">📊 参考节点</h3>
+                <div id="cw-nodes-table"></div>
+            </div>
+            <div style="background:var(--card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:20px;">
+                <h3 style="margin:0 0 12px;font-size:16px;">📚 部署步骤</h3>
+                <ol style="margin:0;padding-left:20px;color:var(--text-muted);font-size:14px;line-height:2;">
+                    <li>点击「生成 Worker 脚本」获取 JS 代码</li>
+                    <li>登录 <a href="https://dash.cloudflare.com" target="_blank" style="color:var(--primary);">Cloudflare Dashboard</a></li>
+                    <li>Workers & Pages → Create Application → Create Worker → Quick Edit</li>
+                    <li>粘贴脚本代码，Save and Deploy</li>
+                    <li>把配置链接中的 YOUR_WORKER_HOST 替换为实际地址</li>
+                    <li>用配置链接更新你的客户端</li>
+                </ol>
+                <p style="margin:12px 0 0;font-size:12px;color:var(--text-muted);">⚠️ 免费版限制：10 万次请求/天，30s 超时。重度用户请升级 Paid Worker（$5/月）。</p>
+            </div>
+        </div>`;
+}
+
+let _cwScript = '', _cwConfigLink = '';
+
+async function generateWorker() {
+    const nodeCount = parseInt(document.getElementById('cw-nodes').value) || 20;
+    const userId = document.getElementById('cw-uuid').value.trim();
+    const proxyIp = document.getElementById('cw-proxy-ip').value.trim();
+    const maxCh = parseInt(document.getElementById('cw-channels').value) || 100;
+    try {
+        const r = await fetch('/api/edgetunnel/generate', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({node_count: nodeCount, user_id: userId || null,
+                                   proxy_ip: proxyIp, max_channels: maxCh, include_nodes: true}),
+        });
+        const d = await r.json();
+        if (!d.ok) { showToast('生成失败: ' + (d.error || 'unknown'), 'error'); return; }
+        _cwScript = d.script; _cwConfigLink = d.config_link;
+        document.getElementById('cw-script').value = d.script;
+        document.getElementById('cw-config-link').value = d.config_link;
+        document.getElementById('cw-result').style.display = 'block';
+        document.getElementById('cw-config').style.display = 'block';
+        if (d.nodes && d.nodes.length > 0) {
+            document.getElementById('cw-nodes-table').innerHTML = '<table style="width:100%;font-size:13px;"><thead><tr><th style="text-align:left;">名称</th><th>协议</th><th>服务器</th><th>延迟</th><th>国家</th></tr></thead><tbody>'
+                + d.nodes.map(n => '<tr><td>' + escHtml(n.name || '') + '</td><td>' + escHtml(n.type || '')
+                + '</td><td style="font-family:monospace;font-size:11px;">' + escHtml(n.server || '') + ':' + n.port + '</td>'
+                + '<td>' + (n.latency ? n.latency + 'ms' : '-') + '</td><td>' + escHtml(n.country || '') + '</td></tr>').join('')
+                + '</tbody></table>';
+            document.getElementById('cw-nodes-list').style.display = 'block';
+        } else { document.getElementById('cw-nodes-list').style.display = 'none'; }
+        showToast('✅ Worker 脚本已生成（' + d.node_count + ' 个参考节点）');
+    } catch (e) { showToast('请求失败: ' + e.message, 'error'); }
+}
+
+async function loadExample() {
+    try {
+        const r = await fetch('/api/edgetunnel/config-example');
+        const d = await r.json();
+        _cwScript = d.script; _cwConfigLink = d.config_link;
+        document.getElementById('cw-script').value = d.script;
+        document.getElementById('cw-config-link').value = d.config_link;
+        document.getElementById('cw-result').style.display = 'block';
+        document.getElementById('cw-config').style.display = 'block';
+        document.getElementById('cw-nodes-list').style.display = 'none';
+        showToast('✅ 示例已加载');
+    } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
+}
+
+function copyWorkerScript() {
+    const el = document.getElementById('cw-script'); el.select();
+    navigator.clipboard.writeText(el.value).then(() => showToast('脚本已复制')).catch(() => showToast('复制失败', 'error'));
+}
+function downloadWorkerScript() {
+    const blob = new Blob([_cwScript], {type: 'text/javascript'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'worker.js'; a.click(); URL.revokeObjectURL(a.href);
+    showToast('✅ 已下载 worker.js');
+}
+function copyConfigLink() {
+    const el = document.getElementById('cw-config-link'); el.select();
+    navigator.clipboard.writeText(el.value).then(() => showToast('链接已复制')).catch(() => showToast('复制失败', 'error'));
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
 </body>
 </html>

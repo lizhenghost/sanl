@@ -762,9 +762,11 @@ FORMAT_GENERATORS = {
     "vless": lambda ns: generate_links(_filter_nodes(ns, "vless")),
     "trojan": lambda ns: generate_links(_filter_nodes(ns, "trojan")),
     "hysteria2": lambda ns: generate_links(_filter_nodes(ns, "hysteria2")),
+    "hysteria": lambda ns: generate_links(_filter_nodes(ns, "hysteria")),
     "tuic": lambda ns: generate_links(_filter_nodes(ns, "tuic")),
     "http": lambda ns: generate_links(_filter_nodes(ns, "http")),
     "socks5": lambda ns: generate_links(_filter_nodes(ns, "socks5")),
+    "socks": lambda ns: generate_links(_filter_nodes(ns, "socks5")),
 }
 
 # 单协议过滤（大小写不敏感，兼容 node_type 变体）
@@ -779,9 +781,12 @@ def _filter_nodes(nodes: List[Node], ptype: str) -> List[Node]:
 
 
 def generate_by_format(fmt: str, nodes: List[Node]) -> str:
-    gen = FORMAT_GENERATORS.get(fmt)
+    key = (fmt or "").strip().lower()
+    if not key:
+        raise ValueError("格式为空")
+    gen = FORMAT_GENERATORS.get(key)
     if not gen:
-        raise ValueError(f"未知导出格式: {fmt}")
+        raise ValueError(f"未知导出格式: {fmt}（支持: {', '.join(sorted(FORMAT_GENERATORS.keys()))}）")
     return gen(nodes)
 
 
@@ -803,7 +808,9 @@ EXPORT_CONTENT_TYPES = {
     "vless": "text/plain; charset=utf-8",
     "trojan": "text/plain; charset=utf-8",
     "hysteria2": "text/plain; charset=utf-8",
+    "hysteria": "text/plain; charset=utf-8",
     "tuic": "text/plain; charset=utf-8",
     "http": "text/plain; charset=utf-8",
     "socks5": "text/plain; charset=utf-8",
+    "socks": "text/plain; charset=utf-8",
 }
