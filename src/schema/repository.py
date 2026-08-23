@@ -24,6 +24,7 @@ def _migrate(conn):
     add_column("nodes", "fail_count", "INTEGER NOT NULL DEFAULT 0")
     add_column("sources", "fail_count", "INTEGER NOT NULL DEFAULT 0")
     add_column("sources", "category", "TEXT DEFAULT 'free'")
+    add_column("sources", "speed_test", "INTEGER NOT NULL DEFAULT 1")  # 源级测速参与开关
     add_column("nodes", "fingerprint", "TEXT")
     add_column("nodes", "last_seen_at", "INTEGER")
     add_column("nodes", "favorite", "INTEGER NOT NULL DEFAULT 0")
@@ -485,6 +486,15 @@ def enable_source(source_id: int, enabled: int = 1):
         )
 
 
+def set_source_speed_test(source_id: int, speed_test: int = 1):
+    """切换源是否参与测速（源级测速参与开关）"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE sources SET speed_test = ?, updated_at = ? WHERE id = ?",
+            (speed_test, int(__import__('time').time()), source_id)
+        )
+
+
 # ===== Node CRUD =====
 
 def add_node(subscribe_url: str, source_id: Optional[int], node_name: str, node_type: str, node_data: dict, status: Optional[str] = None) -> Node:
@@ -627,12 +637,21 @@ def add_check_job(job_type: str) -> CheckJob:
 
 def update_check_job(job_id: int, status: str, result: Optional[str] = None, error: Optional[str] = None):
     import time
+    now = int(time.time())
     with get_connection() as conn:
-        conn.execute(
-            """UPDATE check_jobs SET status = ?, result = ?, error_message = ?,
-               finished_at = ? WHERE id = ?""",
-            (status, result, error, int(time.time()), job_id)
-        )
+        # status=running 时记录 started_at；完成/失败时记录 finished_at
+        if status in ("running", "pending"):
+            conn.execute(
+                """UPDATE check_jobs SET status = ?, result = ?, error_message = ?,
+                   started_at = COALESCE(started_at, ?), finished_at = NULL WHERE id = ?""",
+                (status, result, error, now, job_id)
+            )
+        else:
+            conn.execute(
+                """UPDATE check_jobs SET status = ?, result = ?, error_message = ?,
+                   finished_at = ? WHERE id = ?""",
+                (status, result, error, now, job_id)
+            )
 
 
 def get_check_job(job_id: int) -> Optional[CheckJob]:
@@ -914,9 +933,9 @@ def get_score_trend(limit: int = 30) -> list:
         avg_score = 0.0
         try:
             result = json.loads(r["result"]) if r["result"] else {}
-            total = result.get("total", 0) or 0
-            alive = result.get("alive", 0) or result.get("available", 0) or 0
-            avg_score = float(result.get("avg_score", 0) or 0)
+            total = result.get("total", 0) or result.get("total_nodes", 0) or 0
+            alive = result.get("alive", 0) or result.get("available", 0) or result.get("active", 0) or 0
+            avg_score = float(result.get("avg_score", 0) or result.get("score", 0) or 0)
         except Exception:
             pass
         trend.append({

@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, Upl
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.routing import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
 from ..config import get_app_config, get_scheduler_config
@@ -133,6 +133,13 @@ async def list_sources(enabled: bool = True):
 async def toggle_source(source_id: int, enabled: bool = True):
     """启用/禁用数据源"""
     repository.enable_source(source_id, 1 if enabled else 0)
+    return {"status": "ok"}
+
+
+@api_router.put("/sources/{source_id}/speed-test")
+async def toggle_source_speed_test(source_id: int, speed_test: bool = True):
+    """切换数据源是否参与测速（1=参加延迟/测速, 0=不参加）"""
+    repository.set_source_speed_test(source_id, 1 if speed_test else 0)
     return {"status": "ok"}
 
 
@@ -461,6 +468,7 @@ async def list_nodes(
             "status": n.status, "country": n.country, "country_code": getattr(n, "country_code", None),
             "latency": n.latency, "download_speed": n.download_speed, "score": n.score,
             "last_checked_at": n.last_checked_at, "fail_count": getattr(n, "fail_count", 0),
+            "stream_flags": getattr(n, "stream_flags", None),  # 流媒体解锁标记（Netflix/Disney/YouTube 等）
         }
         d.update(repository.score_grade(n.score or 0))
         result.append(d)
@@ -866,22 +874,26 @@ async def create_new_token(token_data: TokenCreate):
 
 class TokenRefreshRequest(BaseModel):
     token: str
+    renew_days: Optional[int] = Field(None, ge=1, le=3650, description="强制续期时间（天）：从当前时间起算，覆盖原过期时间")
 
 
 @api_router.post("/token/refresh")
 async def refresh_token(req: TokenRefreshRequest):
-    """轮换 Token：旧 token 立即失效，生成同权限新 token（附录 J.2 刷新接口）"""
+    """轮换 Token：旧 token 立即失效，生成同权限新 token（附录 J.2 刷新接口）。
+    传 renew_days 时强制续期（新过期时间 = now + N 天）；不传则沿用原过期时间。"""
     import secrets as _secrets
     old = repository.get_token_by_value(req.token)
     if not old or not old.is_active:
         raise HTTPException(status_code=401, detail="Invalid or inactive token")
     new_token = "np_" + _secrets.token_hex(32)
+    # 强制续期：renew_days 从当前时间重新起算；否则沿用旧 expired_at
+    new_expired = (int(__import__('time').time()) + req.renew_days * 86400) if req.renew_days else old.expired_at
     t = repository.create_token(
         user_id=old.user_id, token_str=new_token, name=old.name,
-        permissions=old.permissions, expired_at=old.expired_at
+        permissions=old.permissions, expired_at=new_expired
     )
     repository.delete_token(old.id)
-    return {"token": new_token, "name": old.name, "permissions": old.permissions}
+    return {"token": new_token, "name": old.name, "permissions": old.permissions, "expired_at": new_expired}
 
 
 @api_router.get("/tokens")

@@ -395,22 +395,31 @@
             loadNodes();
         }
 
-        let nodePage = 0, nodePageSize = 50;
+        let nodePage = 0, nodePageSize = 50, nodeTotal = 0;
 
-        async function loadNodes() {
+        async function loadNodes(reset = true) {
+            if (reset) nodePage = 0;
             const status = document.getElementById('nf-status').value;
             const type = document.getElementById('nf-type').value;
             const sort = document.getElementById('nf-sort') ? document.getElementById('nf-sort').value : 'latency';
             const order = document.getElementById('nf-order') ? document.getElementById('nf-order').value : 'asc';
             const src = document.getElementById('nf-src') ? document.getElementById('nf-src').value : '';
-            let url = `${API}/nodes?limit=200&sort=${sort}&order=${order}&_t=${Date.now()}`;
+            const offset = nodePage * nodePageSize;
+            // 真分页：每次只拉当前页（原写死 limit=200 导致永远只显示前 4 页）
+            let url = `${API}/nodes?limit=${nodePageSize}&offset=${offset}&sort=${sort}&order=${order}&_t=${Date.now()}`;
             if (status) url += `&status=${status}`;
             if (type) url += `&node_type=${type}`;
             if (src) url += `&source_type=${src}`;
             try {
                 const nodes = await (await fetch(url)).json();
                 allNodes = nodes;
-                nodePage = 0;
+                // 总数用于计算总页数（来自统计接口）
+                try {
+                    const st = await (await fetch(`${API}/nodes/stats`)).json();
+                    nodeTotal = (st && (st.total || st.total_nodes)) || nodes.length;
+                } catch(e) { nodeTotal = nodes.length + offset; }
+                const loading = document.getElementById('nodes-loading');
+                if (loading) loading.style.display = 'none';
                 renderNodePage();
             } catch(e) { console.error(e); }
         }
@@ -427,14 +436,12 @@
         function renderNodePage() {
             const pag = document.getElementById('nodes-pagination');
             if (!pag) return;  // 页面已切换，放弃渲染
-            const start = nodePage * nodePageSize;
-            const page = allNodes.slice(start, start + nodePageSize);
-            renderNodeTable(page);
-            const total = Math.ceil(allNodes.length / nodePageSize);
+            renderNodeTable(allNodes);  // allNodes 已是当前页数据
+            const total = Math.max(1, Math.ceil(nodeTotal / nodePageSize));
             let html = '';
-            if (nodePage > 0) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage--;renderNodePage()">上一页</button>`;
-            html += `<span class="text-muted" style="padding:0 12px;">${nodePage+1}/${total}</span>`;
-            if (start + nodePageSize < allNodes.length) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage++;renderNodePage()">下一页</button>`;
+            if (nodePage > 0) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage--;loadNodes(false)">上一页</button>`;
+            html += `<span class="text-muted" style="padding:0 12px;">${nodePage+1}/${total}（共 ${nodeTotal} 节点）</span>`;
+            if (nodePage < total - 1) html += `<button class="btn btn-sm btn-secondary" onclick="nodePage++;loadNodes(false)">下一页</button>`;
             pag.innerHTML = html;
         }
 
@@ -511,6 +518,33 @@
             showToast(`✅ 已导出 ${rows.length} 个节点 (${fmt.toUpperCase()})`);
         }
 
+        // 国旗 emoji：由 ISO 国家/地区码（两位大写字母）换算，修复 Windows/部分安卓手机无法渲染国旗的问题
+        function flagEmoji(code) {
+            if (!code || code.length !== 2) return '';
+            const A = 0x1F1E6, a = 'A'.charCodeAt(0);
+            const c0 = code[0].toUpperCase().charCodeAt(0), c1 = code[1].toUpperCase().charCodeAt(0);
+            if (c0 < a || c0 > a + 25 || c1 < a || c1 > a + 25) return '';
+            try { return String.fromCodePoint(A + c0 - a, A + c1 - a); }
+            catch(e) { return ''; }
+        }
+        function countryCell(n) {
+            // 优先用干净的国家名；若带方框（别字/无法渲染）去掉，再补国旗 emoji
+            const raw = (n.country || '');
+            const code = (n.country_code || '').trim().toUpperCase();
+            const flag = flagEmoji(code);
+            const name = (raw || '').replace(/^[^\w\u4e00-\u9fa5]+/, '').replace(/\s+$/, '') || (code ? code : '🌐');
+            if (!name) return '🌐';
+            return flag ? `${flag} ${name}` : name;
+        }
+
+        function streamBadge(flags) {
+            if (!flags) return '<span class="text-muted" style="font-size:12px;">-</span>';
+            // 流媒体解锁徽章（Netflix/Disney/YouTube 等，来自 full 模式 media-check）
+            const map = { 'Netflix':'NF','Disney':'D+','HBO':'HBO','Hulu':'Hulu','YouTube':'YT',
+                          'ChatGPT':'GPT','TikTok':'TT','Prime':'PM' };
+            return `<span class="badge badge-success" title="${flags}">${flags.split('|').map(f=>map[f]||f).join(' ')}</span>`;
+        }
+
         async function banNode(id, ban) {
             try {
                 const r = await (await fetch(`${API}/nodes/${id}/${ban ? 'ban' : 'unban'}`, { method: 'POST' })).json();
@@ -525,7 +559,7 @@
             const cols = [
                 ['star','',''], ['name','名称'], ['type','协议'], ['country','国家'],
                 ['latency','延迟'], ['speed','速度'], ['score','评分'], ['grade','等级'], ['status','状态'],
-                ['trend','📈',''], ['ban','🚫','']
+                ['stream','解锁',''], ['trend','📈',''], ['ban','🚫','']
             ].filter(c => !colVis.includes(c[0]));
             if (thead) thead.innerHTML = cols.map(c => `<th>${c[1]}</th>`).join('');
             if (!nodes.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><div class="empty-icon">📭</div>暂无节点</td></tr>`; return; }
@@ -540,12 +574,13 @@
                     star: `<td style="cursor:pointer;font-size:16px;" onclick="toggleFavorite(${n.id})" title="收藏（订阅置顶）">${starIcon(n)}</td>`,
                     name: `<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${n.node_name||'-'}</td>`,
                     type: `<td><span class="badge badge-info">${(n.node_type||'').toUpperCase()}</span></td>`,
-                    country: `<td>${n.country||'🌐'}</td>`,
+                    country: `<td>${countryCell(n)}</td>`,
                     latency: `<td>${n.latency ? n.latency+'ms' : '-'}</td>`,
                     speed: `<td>${speed}</td>`,
                     score: `<td style="color:${scoreColor};">${score.toFixed(1)}</td>`,
                     grade: `<td>${grade}</td>`,
                     status: `<td><span class="badge ${statusClass}">${n.status==='banned'?'🚫 '+n.status:n.status}</span></td>`,
+                    stream: `<td>${streamBadge(n.stream_flags)}</td>`,
                     trend: `<td style="cursor:pointer;" onclick="showTrend(${n.id},'${safeName}')" title="近7天趋势">📈</td>`,
                     ban: `<td style="cursor:pointer;white-space:nowrap;" title="${n.status==='banned'?'解封':'封禁'}">${n.status==='banned'
                         ? `<button class="btn btn-secondary btn-sm" onclick="banNode(${n.id},false)">♻️ 解封</button>`
@@ -631,7 +666,9 @@
                         symbolSize: v => Math.max(5, Math.min(30, v[2] * 3)),
                         itemStyle: { color: '#2563eb', opacity: 0.75 },
                         encode: { value: 2 },
-                        label: worldOk ? {} : { show: true, formatter: p => p.name, position: 'right', color: '#475569', fontSize: 10 }
+                        // 世界地图上也显示国家名（节点数≥3 才显示，避免密集），原 worldOk 时完全隐藏导致地图标签太模糊
+                        label: { show: true, formatter: p => (p.value && p.value[2] >= 3) ? p.name : '',
+                                 position: 'right', color: '#475569', fontSize: 10 }
                     },
                     // 热门地区波纹动画（大纲 附录 I.2 effectScatter）：节点数 TOP 5
                     {
@@ -686,7 +723,7 @@
                 <div id="sources-tab-list" style="${sourcesTab==='list'?'':'display:none;'}">
                     <div id="source-health" class="stats-grid" style="grid-template-columns:repeat(3,1fr);"></div>
                     <div class="table-container"><table><thead><tr>
-                        <th>名称</th><th>URL</th><th>类型</th><th>节点数</th><th>健康状态</th><th>操作</th>
+                        <th>名称</th><th>URL</th><th>类型</th><th>节点数</th><th>健康状态</th><th>测速</th><th>操作</th>
                     </tr></thead><tbody id="sources-tbody"></tbody></table></div>
                 </div>
                 <div id="sources-tab-import" style="${sourcesTab==='import'?'':'display:none;'}">
@@ -1156,19 +1193,24 @@
                     <div class="stat-card"><div class="stat-value" style="color:#2563eb;">${nodeCount}</div><div class="stat-label">累计节点</div></div>
                 `;
                 const tbody = tbodyEl;
-                if (!sources.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="empty-icon">📭</div>暂无数据源，点击"预置源"一键导入</td></tr>'; return; }
+                if (!sources.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty"><div class="empty-icon">📭</div>暂无数据源，点击"预置源"一键导入</td></tr>'; return; }
                 tbody.innerHTML = sources.map(s => {
                     const h = health.find(h => h.id === s.id);
                     const st = h ? (h.state || (h.healthy ? 'healthy' : 'unhealthy'))
                                  : (s.last_status === 1 && s.enabled ? 'healthy' : (s.last_status === 0 ? 'pending' : 'unhealthy'));
+                    const stest = s.speed_test === undefined || s.speed_test === null ? 1 : s.speed_test;
                     const badge = st === 'healthy' ? '<span class="badge badge-success">健康</span>'
                                 : st === 'pending' ? '<span class="badge badge-info">待抓取</span>'
                                 : `<span class="badge badge-danger">异常${(s.fail_count||0) >= 3 ? '×'+s.fail_count : ''}</span>`;
                     return `<tr><td>${s.name}</td>
-                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:12px;">${s.url}</td>
+                        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;font-size:12px;" title="${s.url}">${s.url}</td>
                         <td><span class="badge badge-info">${s.source_type}</span></td>
                         <td>${s.node_count||0}</td>
                         <td>${badge}</td>
+                        <td>
+                            <button class="btn btn-sm ${stest ? 'btn-primary' : 'btn-secondary'}" onclick="toggleSpeedTest(${s.id},${stest?0:1})"
+                                title="是否参与延迟/测速">${stest ? '⚡测速中' : '⏸️跳过'}</button>
+                        </td>
                         <td>
                             <button class="btn btn-sm ${s.enabled ? 'btn-secondary' : 'btn-primary'}" onclick="toggleSource(${s.id},${!s.enabled})">${s.enabled ? '禁用' : '启用'}</button>
                             <button class="btn btn-sm btn-danger" onclick="deleteSource(${s.id})">删除</button>
@@ -1177,6 +1219,11 @@
             } catch(e) { console.error(e); showToast('数据源加载失败: ' + (e.message||'网络错误'), 'error'); }
         }
 
+        async function toggleSpeedTest(id, speed_test) {
+            await fetch(`${API}/sources/${id}/speed-test?speed_test=${speed_test}`, {method:'PUT'});
+            showToast(speed_test ? '⚡ 已加入测速' : '⏸️ 已跳过测速');
+            loadSources();
+        }
         async function toggleSource(id, enabled) {
             await fetch(`${API}/sources/${id}/enable?enabled=${enabled}`, {method:'PUT'});
             showToast(enabled ? '已启用' : '已禁用');
@@ -1310,8 +1357,9 @@
                             <label style="font-size:12px;">下载数据 MB<input class="form-input" id="ov-download-mb" type="number" min="1" placeholder="按模式"></label>
                             <label style="font-size:12px;">下载限时 s<input class="form-input" id="ov-download-timeout" type="number" min="1" max="30" placeholder="按模式"></label>
                             <label style="font-size:12px;">测速并发<input class="form-input" id="ov-speed-concurrent" type="number" min="1" max="200" placeholder="默认 40"></label>
+                            <label style="font-size:12px;">参与源数量<input class="form-input" id="ov-max-sources" type="number" min="1" max="100" placeholder="全部源"></label>
                         </div>
-                        <p class="text-muted" style="font-size:11px;margin-top:6px;">⚠️ 测速并发×节点速度 不要超过出口总带宽，否则结果偏低。参数仅对本次任务生效。</p>
+                        <p class="text-muted" style="font-size:11px;margin-top:6px;">⚠️ 测速并发×节点速度 不要超过出口总带宽，否则结果偏低。「参与源数量」只测节点数最多的前 N 个源，显著提速。参数仅对本次任务生效。</p>
                     </details>
                 </div>
                 <div class="chart-container" style="margin-bottom:16px;">
@@ -1469,7 +1517,7 @@
             const ov = {};
             const map = {'ov-concurrent':'concurrent','ov-timeout':'timeout','ov-min-speed':'min-speed',
                          'ov-download-mb':'download-mb','ov-download-timeout':'download-timeout',
-                         'ov-speed-concurrent':'speed-concurrent'};
+                         'ov-speed-concurrent':'speed-concurrent','ov-max-sources':'max_sources'};
             for (const [elId, key] of Object.entries(map)) {
                 const el = document.getElementById(elId);
                 if (el && el.value !== '' && el.value != null) ov[key] = isNaN(Number(el.value)) ? el.value : Number(el.value);
@@ -1990,11 +2038,23 @@
         async function refreshSidebarStats() {
             try {
                 const stats = await (await fetch(`${API}/nodes/stats`)).json();
-                document.getElementById('total-nodes').textContent = `总节点: ${stats.total}`;
+                const el = document.getElementById('total-nodes');
+                if (el) el.textContent = `总节点: ${stats.total}`;
+            } catch(e) {}
+            // 「最近检查」：取最近一次已完成的测速任务时间（原始终显示 "--"）
+            try {
+                const h = await (await fetch(`${API}/check/history?limit=20`)).json();
+                const done = (Array.isArray(h) ? h : []).find(j => j.status === 'completed' && j.finished_at);
+                const el = document.getElementById('last-check');
+                if (el) {
+                    el.textContent = done
+                        ? `最近检查: ${new Date((done.finished_at || 0) * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'月').replace(/\s/g,' ')}`
+                        : '最近检查: --';
+                }
             } catch(e) {}
         }
         refreshSidebarStats();
-        setInterval(refreshSidebarStats, 30000);
+        setInterval(refreshSidebarStats, 10000);  // 刷新提速：30s→10s
     </script>
 <nav id="bottom-tab">
     <div data-page="dashboard" onclick="btGo(this)">📊<span i18n="dashboard">仪表盘</span></div>

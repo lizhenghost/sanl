@@ -26,6 +26,7 @@ class Source:
     url: str = ""
     source_type: str = SourceType.UNKNOWN.value
     enabled: int = 1
+    speed_test: int = 1   # 是否参与测速（1=参加, 0=不参加）
     last_fetched_at: Optional[int] = None
     last_status: int = 0
     node_count: int = 0
@@ -94,4 +95,5 @@ class Token:
     is_active: int = 1
     expired_at: Optional[int] = None
     last_used_at: Optional[int] = None
+    traffic_limit_mb: float = 0   # 流量限额（MB，0=不限）；缺此字段会导致 Token(**dict) 全部 500
     created_at: Optional[int] = None

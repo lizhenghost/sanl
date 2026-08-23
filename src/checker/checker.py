@@ -201,6 +201,7 @@ class Checker:
         overrides: 覆盖 subs-check 参数（仅白名单键生效）"""
         mode = mode if mode in CHECK_MODES else "speed"
         job_id = repository.add_check_job("full_check")
+        repository.update_check_job(getattr(job_id, "id", job_id), "running")  # pending→running，修 history/progress 分歧
         self._job_init(getattr(job_id, "id", job_id), trigger, mode)
         job = self.current_job
 
@@ -208,15 +209,22 @@ class Checker:
         TASK_ID = "check"
         task_manager.start(TASK_ID, f"⚡ {CHECK_MODES[mode]['label']}测速")
         try:
-            sources = repository.list_sources(enabled_only=True)
+            all_sources = repository.list_sources(enabled_only=True)
+            # 源级测速参与开关：只测 speed_test=1 的源（用户可指定哪些源参加/不参加）
+            sources = [s for s in all_sources if int(getattr(s, 'speed_test', 1) or 1)]
+            # 自定义参与源数量（max_sources）：按节点数/健康度排序取前 N，提速增效
+            max_sources = int((overrides or {}).get("max_sources", 0) or 0)
+            if max_sources and max_sources > 0:
+                sources = sorted(sources, key=lambda s: int(getattr(s, 'node_count', 0) or 0), reverse=True)[:max_sources]
             if not sources:
-                logger.warning("No enabled sources found")
+                logger.warning("No enabled sources (or none opted-in to speed test)")
                 repository.update_check_job(job_id.id, "failed", error="No enabled sources")
                 job.update({"status": "failed", "finished_at": time.time(), "error": "No enabled sources"})
                 return {"status": "no_sources", "job_id": job_id}
 
             task_manager.update(TASK_ID, phase="running",
-                                detail=f"准备 {len(sources)} 个源订阅（{CHECK_MODES[mode]['label']}）")
+                                detail=f"准备 {len(sources)} 个源订阅（{CHECK_MODES[mode]['label']}）"
+                                       + (f"，限前 {max_sources} 个源" if max_sources else ""))
             await self._update_subs_check_config(sources, mode=mode, overrides=overrides)
 
             import time as _t
@@ -299,6 +307,8 @@ class Checker:
             if k != "label":
                 config[k] = v
         for k, v in (overrides or {}).items():
+            if k == "max_sources":   # 顶层逻辑参数，不写入 subs-check yaml
+                continue
             if k in OVERRIDABLE_KEYS:
                 config[k] = v
             else:
@@ -513,9 +523,16 @@ class Checker:
                 "stream_flags": "|".join(sorted(stream_flags)) or None,
             })
 
-        from ..schema.repository import apply_check_results
+        from ..schema.repository import apply_check_results, get_ranking_stats
         stats = apply_check_results(results)
         logger.info(f"测速结果回填完成: 存活 {stats['alive']}，未命中转 inactive {stats['marked_inactive']}")
+        # 将存活/总数/均分并入 result，供趋势接口读取（原只存 total_nodes 导致 trend 全 0）
+        try:
+            result["alive"] = int(stats.get("alive", 0))
+            result["total"] = int(result.get("total_nodes", 0) or 0)
+            result["avg_score"] = round(float(get_ranking_stats().get("avg_score", 0) or 0), 1)
+        except Exception as se:
+            logger.warning(f"merge alive into result failed: {se}")
 
     async def get_api_status(self) -> Dict:
         """获取 subs-check API 状态"""

@@ -106,11 +106,101 @@ def generate_clash(nodes: List[Node]) -> str:
             _clash_tls(nd, p)
             if n.country:
                 p["country"] = n.country
+            if n.country_code:
+                p["country_code"] = n.country_code
             proxies.append(p)
         except Exception as e:
             continue
 
-    return yaml.dump({"proxies": proxies}, default_flow_style=False, allow_unicode=True)
+    return yaml.dump(_clash_full_config(proxies), default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def _clash_full_config(proxies: list) -> dict:
+    """补全 Clash 配置结构：proxies + proxy-groups + rules（方案 1.6 自定义代理组规则）。
+    原实现仅输出 proxies 数组，部分客户端直接导入会失败。"""
+    names = []
+    seen = set()
+    for p in proxies:
+        nm = p.get("name", "")
+        if nm and nm not in seen:
+            seen.add(nm)
+            names.append(nm)
+
+    if not names:
+        return {"proxies": proxies}
+
+    # 按国家分组（值取 country 字段，缺省归入「其他节点」）
+    # country 字段可能存 emoji flag（如 🇳🇱），软硬件渲染不统一 → 加中文名。Node 有 country_code 时用之。
+    groups_by_country = {}
+    for p in proxies:
+        c = (p.get("country") or "其他节点").strip()
+        c = _country_label(c, p.get("country_code"))
+        groups_by_country.setdefault(c, []).append(p["name"])
+
+    proxy_groups = [
+        {
+            "name": "🚀 自动选择",
+            "type": "url-test",
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 50,
+            "proxies": names,
+        }
+    ]
+    # 各国家/地区策略组（select 便于手动选）
+    for cname, nodelist in groups_by_country.items():
+        proxy_groups.append({
+            "name": cname if cname else "其他节点",
+            "type": "select",
+            "proxies": ["🚀 自动选择", "DIRECT"] + nodelist,
+        })
+
+    proxy_groups.append({
+        "name": "🚀 节点选择",
+        "type": "select",
+        "proxies": (["🚀 自动选择"] + list(groups_by_country.keys()) + ["DIRECT"]),
+    })
+
+    rules = [
+        # 国内直连 + 局域网/本地 DNS 走直连
+        "GEOIP,CN,DIRECT",
+        "DOMAIN-SUFFIX,knowngraph.com,DIRECT",
+        "MATCH,🚀 节点选择",
+    ]
+
+    return {"proxies": proxies, "proxy-groups": proxy_groups, "rules": rules}
+
+
+# 常见国旗 emoji → 中文国家名（订阅分组名若要可读，避免客户端显示 □□）
+_FLAG_NAMES = {
+    '🇳🇱':'荷兰','🇺🇸':'美国','🇷🇴':'罗马尼亚','🇩🇪':'德国','🇫🇷':'法国','🇨🇦':'加拿大',
+    '🇬🇧':'英国','🇫🇮':'芬兰','🇵🇱':'波兰','🇧🇷':'巴西','🇦🇺':'澳大利亚','🇯🇵':'日本',
+    '🇸🇬':'新加坡','🇭🇰':'香港','🇹🇼':'台湾','🇰🇷':'韩国','🇮🇳':'印度','🇹🇷':'土耳其',
+    '🇷🇺':'俄罗斯','🇦🇪':'阿联酋','🇪🇪':'爱沙尼亚','🇴🇲':'阿曼','🇪🇸':'西班牙','🇿🇦':'南非',
+    '🇹🇭':'泰国','🇷🇸':'塞尔维亚','🇨🇭':'瑞士','🇸🇪':'瑞典','🇦🇹':'奥地利','🇻🇳':'越南',
+    '🇧🇬':'保加利亚','🇮🇹':'意大利','🇮🇷':'伊朗','🇨🇳':'中国','🇵🇦':'巴拿马','🇳🇴':'挪威',
+    '🇱🇻':'拉脱维亚','🇬🇷':'希腊','🇧🇪':'比利时','🇲🇽':'墨西哥','🇭🇺':'匈牙利','🇨🇴':'哥伦比亚',
+    '🇩🇰':'丹麦','🇰🇿':'哈萨克斯坦','🇲🇴':'澳门','🇨🇾':'塞浦路斯','🇨🇿':'捷克','🇦🇲':'亚美尼亚',
+    '🇵🇹':'葡萄牙','🇱🇹':'立陶宛','🇲🇩':'摩尔多瓦','🇮🇪':'爱尔兰','🇲🇾':'马来西亚','🇨🇱':'智利',
+    '🇦🇷':'阿根廷','🇿🇦':'南非','🇳🇿':'新西兰','🇺🇦':'乌克兰','🇮🇩':'印尼','🇸🇦':'沙特',
+}
+def _country_label(country: str, code=None) -> str:
+    """把 country（可能是 emoji flag / 中文名 / 未知）转成可读的 [旗帜]中文名 标签。"""
+    raw = (country or "").strip()
+    if not raw or raw in ("", "其他节点", "None", "unknown"):
+        if code:
+            return code.upper()
+        return "其他节点"
+    # 若已是带中文的名字（如 "美国"）直接返回；若是纯 emoji flag 则映射为中文名
+    if any('\u4e00' <= ch <= '\u9fa5' for ch in raw):
+        return raw
+    if raw in _FLAG_NAMES:
+        return _FLAG_NAMES[raw]
+    # 形如 flag+文字 的组合，取文字部分
+    for ch in raw:
+        if '\u4e00' <= ch <= '\u9fa5':
+            return raw
+    return raw or "其他节点"
 
 
 def _clash_transport(nd: dict, p: dict):

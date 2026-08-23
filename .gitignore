@@ -16,3 +16,4 @@ logs/
 *_TODO.md
 *.db-shm
 *.db-wal
+app.log
