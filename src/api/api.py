@@ -104,6 +104,19 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
         return response
+
+    # SPA 路由 fallback：前端是单页 tab 切换，地址栏直接输入 /nodes、/dashboard 等
+    # 路径（或刷新、收藏）时，凡未匹配 /api、/sub、/static、/vendor 等前缀的 GET，
+    # 一律返回单页 index.html，由前端 JS 接管渲染，避免空白 404。
+    # 放在所有 mount/router、中间件之后，仅兜底未命中路径。
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        lower = full_path.lower()
+        for prefix in ("api/", "sub/", "static/", "vendor/", "openapi.json",
+                       "docs", "redoc", "sw.js", "manifest.webmanifest", "favicon.ico"):
+            if lower == prefix.rstrip('/') or lower.startswith(prefix):
+                raise HTTPException(status_code=404)
+        return FileResponse(os.path.join(static_dir, "index.html"))
     
     return app
 

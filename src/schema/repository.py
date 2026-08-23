@@ -67,7 +67,7 @@ def _migrate(conn):
     if null_rows:
         for r in null_rows:
             try:
-                data = json.loads(r["node_data"] or "{}")
+                data = _parse_node_data(r["node_data"])
                 fp = node_fingerprint(r["node_type"], data)
             except Exception:
                 continue
@@ -282,6 +282,19 @@ def apply_check_results(results: List[dict]) -> dict:
     return {"alive": alive, "marked_inactive": marked}
 
 
+def _parse_node_data(raw) -> dict:
+    """DB 中 node_data 字段可能为空/坏 JSON；容错解析，任何损坏都不让整个节点列表 500"""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        v = json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
 def list_nodes_missing_geo(limit: int = 300, status: str = "active") -> List[Node]:
     """取国家/国家码尚未填充的节点（GeoIP 刷新优先补这些，避免对已正确节点做无效查询）"""
     with get_connection() as conn:
@@ -292,7 +305,7 @@ def list_nodes_missing_geo(limit: int = 300, status: str = "active") -> List[Nod
         nodes = []
         for r in rows:
             d = dict(r)
-            d['node_data'] = json.loads(d.get('node_data', '{}'))
+            d['node_data'] = _parse_node_data(d.get('node_data'))
             nodes.append(Node(**d))
         return nodes
 
@@ -547,7 +560,7 @@ def get_node(node_id: int) -> Optional[Node]:
         row = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
         if row:
             d = dict(row)
-            d['node_data'] = json.loads(d.get('node_data', '{}'))
+            d['node_data'] = _parse_node_data(d.get('node_data'))
             return Node(**d)
     return None
 
@@ -604,7 +617,7 @@ def list_nodes(status: Optional[str] = None, country: Optional[str] = None, node
         nodes = []
         for r in rows:
             d = dict(r)
-            d['node_data'] = json.loads(d.get('node_data', '{}'))
+            d['node_data'] = _parse_node_data(d.get('node_data'))
             nodes.append(Node(**d))
         return nodes
 
@@ -1013,7 +1026,7 @@ def get_ranking(limit: int = 50, country: Optional[str] = None,
         nodes = []
         for r in rows:
             d = dict(r)
-            d['node_data'] = json.loads(d.get('node_data', '{}'))
+            d['node_data'] = _parse_node_data(d.get('node_data'))
             nodes.append(Node(**d))
         return nodes
 
