@@ -755,7 +755,27 @@ FORMAT_GENERATORS = {
     "surge": generate_surge,
     "loon": generate_loon,
     "qx": generate_qx,
+    # 单协议明文链接（兼容 NekoBox/OneClick 等客户端按协议筛选）
+    "ss": lambda ns: generate_links(_filter_nodes(ns, "ss")),
+    "ssr": lambda ns: generate_links(_filter_nodes(ns, "ssr")),
+    "vmess": lambda ns: generate_links(_filter_nodes(ns, "vmess")),
+    "vless": lambda ns: generate_links(_filter_nodes(ns, "vless")),
+    "trojan": lambda ns: generate_links(_filter_nodes(ns, "trojan")),
+    "hysteria2": lambda ns: generate_links(_filter_nodes(ns, "hysteria2")),
+    "tuic": lambda ns: generate_links(_filter_nodes(ns, "tuic")),
+    "http": lambda ns: generate_links(_filter_nodes(ns, "http")),
+    "socks5": lambda ns: generate_links(_filter_nodes(ns, "socks5")),
 }
+
+# 单协议过滤（大小写不敏感，兼容 node_type 变体）
+def _filter_nodes(nodes: List[Node], ptype: str) -> List[Node]:
+    target = ptype.lower()
+    out = []
+    for n in nodes:
+        t = (n.node_type or "").lower()
+        if t == target or t.endswith(f"-{target}") or t.endswith(f"_{target}"):
+            out.append(n)
+    return out
 
 
 def generate_by_format(fmt: str, nodes: List[Node]) -> str:
@@ -776,4 +796,14 @@ EXPORT_CONTENT_TYPES = {
     "surge": "text/plain; charset=utf-8",
     "loon": "text/plain; charset=utf-8",
     "qx": "text/plain; charset=utf-8",
+    # 单协议明文链接
+    "ss": "text/plain; charset=utf-8",
+    "ssr": "text/plain; charset=utf-8",
+    "vmess": "text/plain; charset=utf-8",
+    "vless": "text/plain; charset=utf-8",
+    "trojan": "text/plain; charset=utf-8",
+    "hysteria2": "text/plain; charset=utf-8",
+    "tuic": "text/plain; charset=utf-8",
+    "http": "text/plain; charset=utf-8",
+    "socks5": "text/plain; charset=utf-8",
 }
