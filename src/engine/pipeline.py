@@ -126,6 +126,7 @@ async def run_pipeline(source_urls: List[str], *,
         pool = alive_l1[:max(1, l2_max)]
         do_speed = mode in ("speed", "full")
         channels = max(2, int(ov.get("concurrent", 16)))
+        probe_timeout = max(8.0, timeout_ms / 1000)
         speed_url = str(ov.get("speed-test-url") or
                         "http://cachefly.cachefly.net/1mb.test")
         min_speed = int(ov.get("min-speed", 128))
@@ -139,6 +140,10 @@ async def run_pipeline(source_urls: List[str], *,
              + (" + L3 测速" if do_speed else ""))
         try:
             await km.start()
+            # 仅探测内核实际接受的节点（_sanitize_proxies 保留的），避免浪费通道
+            keep_names = {p["name"] for p in km.all_proxies}
+            pool = [c for c in pool if c.name in keep_names]
+            stats.l2_candidates = len(pool)
             await probe_candidates(
                 km, pool,
                 do_speed=do_speed, speed_url=speed_url, min_speed=min_speed,
@@ -151,8 +156,8 @@ async def run_pipeline(source_urls: List[str], *,
 
         alive_l2 = [c for c in pool if c.alive]
         stats.l2_alive = len(alive_l2)
-        logger.info(f"[engine] L2 漏斗: {len(pool)} 候选 × {channels} 通道 → 存活 {len(alive_l2)} "
-                    f"({len(alive_l2)/max(1,len(pool))*100:.1f}%) 超时 {alive_timeout if 'alive_timeout' in dir() else 8}s")
+        logger.info(f"[engine] L2 漏斗: {stats.l2_candidates} 候选 × {channels} 通道 → 存活 {len(alive_l2)} "
+                    f"({len(alive_l2)/max(1,stats.l2_candidates)*100:.1f}%) 超时 {probe_timeout:.1f}s")
 
         # ---------- 5. GeoIP + 合格筛选 + 命名 ----------
         passed = [c for c in alive_l2

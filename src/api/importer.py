@@ -220,14 +220,18 @@ def parse_socks5(uri: str) -> Tuple[str, dict, str]:
 
 
 def parse_http_proxy(uri: str) -> Tuple[str, dict, str]:
-    """http://[user:pass@]host:port#name（HTTP 代理节点，host 必须是 IP 以避免误判订阅 URL）"""
+    """http://[user:pass@]host:port#name（HTTP 代理节点，允许 IP 或域名）
+    subs-check 产出的 http 代理节点常是域名型（如 vps.xxx.com:8080），
+    带端口或用户名即可与订阅 URL 区分；订阅 URL 通常无端口无认证。"""
     from urllib.parse import urlsplit
     u = urlsplit(uri)
     host = u.hostname or ""
-    if not _is_ipv4(host):
-        raise ValueError("http 代理节点 host 必须为 IP（域名型请用表单或 Clash 导入）")
-    port = u.port or 80
-    data = {"server": host, "port": port, "udp": False}
+    if not host:
+        raise ValueError("http 代理节点 host 无效")
+    port = u.port
+    if not port and not u.username:
+        raise ValueError("http 节点无端口且无认证信息，疑似订阅 URL，跳过")
+    data = {"server": host, "port": port or 80, "udp": False}
     if u.username: data["username"] = unquote(u.username)
     if u.password: data["password"] = unquote(u.password)
     frag = uri.split("#", 1)[1] if "#" in uri else ""

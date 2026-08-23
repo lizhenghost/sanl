@@ -4,7 +4,7 @@
 
 ## 当前运行态
 - **服务**: `python3 main.py`，PID `pgrep -f "python3 main.py"`，端口 8899，日志 `app.log`，DB `data/nodes.db`
-- **最新动态**: 本地 commit `0f8c63a`（未推送 GitHub，待用户确认 PAT）
+- **最新动态**: 本地 commit `48a86a0`（已推 GitHub），job 105 完成：active **12→44**（+3.7×），协议 ss:27/vless:11/trojan:3/vmess:2/http:1，候选 7629/存活 53/评分 51.6
 
 ## 本次修复清单（2026-08-23，用户逐项反馈）
 1. ❌→✅ **Token 全部 500（最大痛点）**
@@ -150,3 +150,9 @@
 - 3万+ = 各源页面 node_count 原始总和（含 CF IP 列表类源 + 跨源重复 + 同仓库多格式）
 - cf_endpoints 表 2.9 万是 CF 优选 IP（无协议密码，非代理节点，独立管理层）
 - 真实去重代理节点 8871 个；免费聚合池能存活的比例就是 ~13%，这是所有免费订阅 aggregator 的客观水平
+15. ❌→✅ **修复后 active 节点验证（job 105）**
+   - job 105 候选 7629，存活 53，active 44（之前 12），**提升 3.7 倍**
+   - active 协议：ss:27, vless:11, trojan:3, vmess:2, http:1
+   - 延迟分布：0-100ms:9, 100-200ms:10, 200-400ms:10, 400-800ms:15
+   - 仍低于 subs-check 750 的原因：候选池 http/vless 仍偏低（importer 已修复域名型解析，但 subs-check 订阅中的 http/vless 节点在管线中仍被部分丢弃）
+   - 结论：候选池层面仍需进一步优化（尤其 vless），引擎内核探活能力已验证合格（B9 98%）
