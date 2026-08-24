@@ -5,7 +5,7 @@
 ## 开发环境
 
 ```bash
-git clone <repo> && cd node-pool
+git clone https://github.com/lizhenghost/sanl.git && cd sanl
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ./scripts/install_subscheck.sh   # 下载测速引擎二进制

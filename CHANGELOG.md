@@ -1,5 +1,46 @@
 # Sanl Changelog
 
+## v2.5.1 - 2026-08-24
+
+### 🔧 CI 修复
+- 修复 GitHub Actions `permissions` 缺失导致 Release 上传失败
+- 补装 `python-multipart` 依赖，4 个 workflow 全绿
+- Android APK（3.1MB）正式附带 Release 下载
+
+### 🎨 前端
+- 表格列显隐浮层重构（修复 `details` containment 导致的弹层裁剪）
+
+## v2.5.0 - 2026-08-23
+
+### ⚙️ 稳定性与性能
+- 健康检查增强：死源自动降权 + 存活率统计
+- 缓存层增强：TTL 命中率浮标实时展示
+- SQLite 查询优化：高频接口索引覆盖
+- 修复文件句柄泄漏（subs-check 子进程日志流）
+
+### 📱 安卓
+- GitHub Actions 自动构建 debug APK 并上传 Artifact
+
+## v2.4.3 - 2026-08-23
+
+### 📱 安卓
+- 新增 `android-build.yml`：PWA → TWA 打包 APK，Release 附 `Sanl-android.apk`
+
+## v2.4.2 - 2026-08-23
+
+### 🚀 边缘中继
+- 集成 [edgetunnel](https://github.com/zizifn/edgetunnel)：`POST /api/edgetunnel/generate` 从节点池取优质 vless/vmess+ws 节点，生成可部署到 CF Workers 的中继脚本
+- 前端新增 **🚀 CF Worker** Tab：配置节点数/UUID/故障转移 IP，一键生成、复制/下载 `worker.js`
+- 清理 5 个冗余 TODO 文档；修复 `static/index.html` ↔ `frontend/index.html` 循环软链接
+
+## v2.4.1 - 2026-08-23
+
+### 🔧 引擎修复
+- 活跃节点 12 → 44：importer 域名型解析 + 字段规范化 + 并发标定 + cfconvert 双 Tab
+- TLS 预检查过滤死节点（72.5% 通过），6 个探测端点覆盖国内外可达性
+- 修复订阅转换后端异常：Clash YAML 注释断行 + inline 缩进保留 + 单协议导出兼容 NekoBox/OneClick
+- 修复 Token 500（缺 traffic_limit_mb）+ 真分页 + Clash groups/rules + 趋势图全 0 + 流媒体检测 + 国旗/地图渲染
+- 新增源级测速开关 / max_sources / 续期天数
 
 ## v2.4.0 - 2026-08-22
 
