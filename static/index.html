@@ -103,7 +103,7 @@
         .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; animation: fadeUp .3s ease both; }
         .page-title { font-size: 28px; font-weight: bold; margin-bottom: 0; background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
         .table-container { animation: fadeUp .3s ease both; }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         .empty { text-align: center; padding: 60px 20px; color: #94a3b8; }
         .empty-icon { font-size: 48px; margin-bottom: 16px; }
         .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #dbeafe; border-radius: 50%; border-top-color: var(--primary); animation: spin 1s linear infinite; }
@@ -128,6 +128,8 @@
         .preset-name { font-weight: 600; margin-bottom: 4px; }
         .preset-url { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #bottom-tab { display: none; }
+        summary::-webkit-details-marker { display: none; }
+        summary { list-style: none; }
         @media (max-width: 768px) {
             .container { flex-direction: column; }
             .sidebar { width: 100%; height: auto; position: static; padding: 10px 12px; display: flex; align-items: center; gap: 8px; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
@@ -331,8 +333,18 @@
         function drawPieChart(id, data) {
             const _el = document.getElementById(id);
             if (!_el) return;  // 页面已切换，放弃渲染（修复跨页 null 崩溃）
+            // 小切片合并为"其他"（>8 个分类时，占比 <3% 的合并），避免饼图碎成一团
+            let pieData = data;
+            const total = data.reduce((s, d) => s + d.value, 0);
+            if (data.length > 8 && total > 0) {
+                const sorted = [...data].sort((a, b) => b.value - a.value);
+                const main = sorted.slice(0, 8);
+                const restSum = sorted.slice(8).reduce((s, d) => s + d.value, 0);
+                if (restSum > 0) main.push({ name: '其他', value: restSum });
+                pieData = main;
+            }
             const chart = echarts.init(_el);
-            chart.setOption({ tooltip:{trigger:'item'}, series:[{type:'pie',radius:['40%','70%'],data,label:{show:true,formatter:'{b}: {c}'}}] });
+            chart.setOption({ tooltip:{trigger:'item'}, series:[{type:'pie',radius:['40%','70%'],data:pieData,label:{show:true,formatter:'{b}: {c}'}}] });
         }
         function drawBarChart(id, x, y) {
             const _el = document.getElementById(id);
@@ -381,19 +393,15 @@
                         </label>
                         <button class="btn btn-secondary" onclick="exportNodes('csv')">CSV</button>
                         <button class="btn btn-secondary" onclick="exportNodes('json')">JSON</button>
-                        <select class="form-input" id="nf-cols" onchange="saveColVis()" multiple title="列显隐" style="height:42px;width:110px;">
-                            <option value="country">国家列</option>
-                            <option value="latency">延迟列</option>
-                            <option value="speed">速度列</option>
-                            <option value="score">评分列</option>
-                            <option value="grade">等级列</option>
-                            <option value="status">状态列</option>
-                        </select>
+                        <div class="nf-cols-dd" id="nf-cols-dd" style="position:relative;display:inline-block;">
+                            <button type="button" class="btn btn-secondary" id="nf-cols-btn" style="display:inline-flex;align-items:center;gap:6px;user-select:none;cursor:pointer;">⚙️ 列显隐 <span style="font-size:11px;opacity:.6;">▾</span></button>
+                        </div>
                     </div>
                 </div>
                 <div class="table-container"><table><thead><tr id="nodes-thead-row"></tr></thead><tbody id="nodes-tbody"></tbody></table></div>
                 <div class="flex-center flex mt-4" id="nodes-pagination"></div>
             `;
+            restoreColVis();
             loadNodes();
         }
 
@@ -449,11 +457,58 @@
 
         let colVis = JSON.parse(localStorage.getItem('np_colvis') || '[]');
         function saveColVis() {
-            const sel = document.getElementById('nf-cols');
-            colVis = Array.from(sel.selectedOptions).map(o => o.value);
+            // 列显隐改为 checkbox 面板：勾选=显示该列
+            colVis = Array.from(document.querySelectorAll('.nf-col-cb'))
+                .filter(cb => !cb.checked).map(cb => cb.value);
             localStorage.setItem('np_colvis', JSON.stringify(colVis));
             renderNodePage();
         }
+        // 渲染节点页后回填列显隐勾选状态
+        function restoreColVis() {
+            ensureColsPanel();  // 面板挂在 body 下，先确保存在再回填勾选
+            document.querySelectorAll('.nf-col-cb').forEach(cb => {
+                cb.checked = !colVis.includes(cb.value);
+                cb.onchange = () => { saveColVis(); };
+            });
+            wireColsPanel();
+        }
+        // 列显隐面板：全局唯一、挂在 body 下（fixed 相对视口），彻底避开表格层叠/裁剪/包含块问题
+        function ensureColsPanel() {
+            let panel = document.getElementById('nf-cols-panel');
+            if (panel) return panel;
+            panel = document.createElement('div');
+            panel.id = 'nf-cols-panel';
+            panel.style.cssText = 'position:fixed;z-index:1500;display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:10px 14px;flex-direction:column;gap:6px;min-width:130px;';
+            panel.innerHTML = [
+                ['country','国家列'],['latency','延迟列'],['speed','速度列'],
+                ['score','评分列'],['grade','等级列'],['status','状态列']
+            ].map(([v,t]) => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" value="${v}" class="nf-col-cb"> ${t}</label>`).join('');
+            document.body.appendChild(panel);
+            return panel;
+        }
+        function wireColsPanel() {
+            const panel = ensureColsPanel();
+            const btn = document.getElementById('nf-cols-btn');
+            if (!btn) return;
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                if (panel.style.display === 'flex') { panel.style.display = 'none'; return; }
+                panel.style.display = 'flex';
+                const r = btn.getBoundingClientRect();
+                const pw = panel.offsetWidth, ph = panel.offsetHeight;
+                panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8)) + 'px';
+                panel.style.top = (r.bottom + 6 + ph > window.innerHeight ? Math.max(8, r.top - ph - 6) : r.bottom + 6) + 'px';
+            };
+        }
+        // 点击面板/按钮以外区域时收起
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('nf-cols-panel');
+            if (panel && panel.style.display === 'flex'
+                && !panel.contains(e.target)
+                && !(e.target.closest && e.target.closest('#nf-cols-dd'))) {
+                panel.style.display = 'none';
+            }
+        });
         function starIcon(n) { return n.favorite ? '\u2B50' : '\u2606'; }
 
         async function toggleFavorite(id) {
@@ -570,16 +625,19 @@
                 const score = n.score || 0;
                 const scoreColor = score >= 50 ? '#22c55e' : score >= 20 ? '#f59e0b' : '#94a3b8';
                 const statusClass = n.status === 'active' ? 'badge-success' : n.status === 'inactive' ? 'badge-danger' : 'badge-warning';
-                const grade = n.grade ? `<span class="badge ${score>=70?'badge-success':score>=50?'badge-warning':'badge-danger'}">${n.emoji||''} ${n.grade}</span>` : '-';
+                // inactive 节点的延迟/速度/评分是上一轮成功时的旧数据，灰显避免误导
+                const stale = n.status !== 'active' ? ' style="opacity:0.45;" title="旧数据（该节点最近一轮测速未通过）"' : '';
+                const staleColor = n.status !== 'active' ? ' style="color:#94a3b8;" title="旧数据（该节点最近一轮测速未通过）"' : ` style="color:${scoreColor};"`;
+                const grade = n.grade ? `<span class="badge ${score>=70?'badge-success':score>=50?'badge-warning':'badge-danger'}"${n.status !== 'active' ? ' style="opacity:0.45;"' : ''}>${n.emoji||''} ${n.grade}</span>` : '-';
                 const safeName = String(n.node_name||'').replace(/'/g,'').slice(0,40);
                 const cells = {
                     star: `<td style="cursor:pointer;font-size:16px;" onclick="toggleFavorite(${n.id})" title="收藏（订阅置顶）">${starIcon(n)}</td>`,
                     name: `<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${n.node_name||'-'}</td>`,
                     type: `<td><span class="badge badge-info">${(n.node_type||'').toUpperCase()}</span></td>`,
                     country: `<td>${countryCell(n)}</td>`,
-                    latency: `<td>${n.latency ? n.latency+'ms' : '-'}</td>`,
-                    speed: `<td>${speed}</td>`,
-                    score: `<td style="color:${scoreColor};">${score.toFixed(1)}</td>`,
+                    latency: `<td${stale}>${n.latency ? n.latency+'ms' : '-'}</td>`,
+                    speed: `<td${stale}>${speed}</td>`,
+                    score: `<td${staleColor}>${score.toFixed(1)}</td>`,
                     grade: `<td>${grade}</td>`,
                     status: `<td><span class="badge ${statusClass}">${n.status==='banned'?'🚫 '+n.status:n.status}</span></td>`,
                     stream: `<td>${streamBadge(n.stream_flags)}</td>`,
@@ -1577,7 +1635,7 @@
                     <div class="flex mt-4" style="align-items:flex-start;gap:24px;flex-wrap:wrap;">
                         <div>
                             <h4 style="margin-bottom:8px;">📱 扫码导入</h4>
-                            <div id="agg-qr" style="background:#fff;padding:8px;border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成后显示</span></div>
+                            <div id="agg-qr" style="background:#fff;padding:8px;border:1px dashed var(--border);border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成后显示</span></div>
                         </div>
                         <div style="flex:1;min-width:220px;">
                             <h4 style="margin-bottom:8px;">✂️ 分来源订阅</h4>
@@ -1621,7 +1679,7 @@
                     <div class="flex mt-4" style="align-items:flex-start;gap:24px;">
                         <div>
                             <h4 style="margin-bottom:8px;">📱 扫码导入</h4>
-                            <div id="sub-qr" style="background:#fff;padding:8px;border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成链接后显示二维码</span></div>
+                            <div id="sub-qr" style="background:#fff;padding:8px;border:1px dashed var(--border);border-radius:8px;width:196px;height:196px;display:flex;align-items:center;justify-content:center;"><span class="text-muted">生成链接后显示二维码</span></div>
                         </div>
                         <div style="flex:1;min-width:240px;">
                             <h4 style="margin-bottom:8px;">🔗 Token 订阅短链</h4>

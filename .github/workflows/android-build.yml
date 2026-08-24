@@ -5,6 +5,10 @@ on:
   push:
     tags: ["v*"]
 
+# 修复 "Resource not accessible by integration"：默认 GITHUB_TOKEN 无 release 写权限
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest

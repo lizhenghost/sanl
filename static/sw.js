@@ -5,7 +5,7 @@
  *  - 静态资源(静态页面/vendor/图标)：Cache-first + 后台更新 (stale-while-revalidate)
  *  - 订阅输出(/sub/、/api/sub)：走网络
  */
-const CACHE = 'sanl-v2';
+const CACHE = 'sanl-v3';
 const CORE = [
   '/',
   '/static/index.html',

@@ -2,6 +2,7 @@
 FastAPI 主应用
 """
 import os
+import time
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File, Body
@@ -310,6 +311,7 @@ async def ban_node(node_id: int):
     ok = repository.set_node_banned(node_id, True)
     if not ok:
         raise HTTPException(status_code=404, detail="节点不存在")
+    invalidate_all()  # 订阅缓存失效
     return {"status": "ok", "id": node_id, "banned": True}
 
 
@@ -319,6 +321,7 @@ async def unban_node(node_id: int):
     ok = repository.set_node_banned(node_id, False)
     if not ok:
         raise HTTPException(status_code=404, detail="节点不存在")
+    invalidate_all()  # 订阅缓存失效
     return {"status": "ok", "id": node_id, "banned": False}
 
 
@@ -389,6 +392,7 @@ async def cf_convert(payload: dict = None):
 
 
 @api_router.get("/cf/endpoints")
+@cached(ttl=10)
 async def list_cf_endpoints(
     limit: int = Query(2000, le=20000),
     isp: Optional[str] = Query(None, pattern="^(telecom|mobile|unicom|all|any)$",
@@ -742,6 +746,38 @@ async def subscribe_by_token(
         raise HTTPException(status_code=429,
                             detail=f"Token 流量配额已用尽 ({quota['used_mb']:.1f}/{quota['limit_mb']:.0f} MB)")
 
+    # 订阅级 TTL 缓存（优化：客户端轮询 3.3s→<10ms）。key 含 token+fmt+全部过滤参数；
+    # 数据变更（测速完成/导入/封禁/收藏）统一走 invalidate_all 失效。
+    from .cache import _CACHE, _LOCK
+    _cache_key = "sub:" + "|".join([
+        str(info.get("id")), fmt,
+        f"limit={limit}", f"min_score={min_score}", f"min_speed={min_speed}",
+        f"max_latency={max_latency}", f"country={country}", f"src={src}",
+        f"proto={proto}", f"status={status}", f"category={category}",
+    ])
+    _now = time.time()
+    with _LOCK:
+        _hit = _CACHE.get(_cache_key)
+    if _hit and _hit[0] > _now:
+        _content, _media = _hit[1], _hit[2]
+        return Response(
+            content=_content,
+            media_type=_media,
+            headers={"Cache-Control": "public, max-age=60", "X-Cache": "HIT",
+                     "profile-update-interval": "6"})
+
+
+    # Token 校验（无效/禁用/过期 → 401）
+    info = repository.validate_token(token)
+    if not info:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # 流量限额检查（大纲 J.2 按流量限制）：超限返回 429
+    quota = repository.check_token_traffic_quota(info.get("id"))
+    if not quota.get("allowed", True):
+        raise HTTPException(status_code=429,
+                            detail=f"Token 流量配额已用尽 ({quota['used_mb']:.1f}/{quota['limit_mb']:.0f} MB)")
+
     if status == "all":
         nodes = repository.list_nodes(
             limit=limit, country=country, node_type=proto,
@@ -772,9 +808,14 @@ async def subscribe_by_token(
     except Exception:
         pass
 
+    # 写入订阅缓存（60s TTL；数据变更时 invalidate_all 全清）
+    _media_type = EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8")
+    with _LOCK:
+        _CACHE[_cache_key] = (_now + 60, content, _media_type)
+
     return Response(
         content=content,
-        media_type=EXPORT_CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
+        media_type=_media_type,
         headers={"Cache-Control": "no-cache", "profile-update-interval": "6"}
     )
 
@@ -784,6 +825,7 @@ async def toggle_node_favorite(node_id: int):
     """切换节点收藏（星标）；收藏节点在订阅输出中置顶"""
     try:
         fav = repository.toggle_favorite(node_id)
+        invalidate_all()  # 订阅缓存失效（收藏节点置顶排序变化）
         return {"status": "ok", "id": node_id, "favorite": fav}
     except ValueError:
         raise HTTPException(status_code=404, detail="Node not found")

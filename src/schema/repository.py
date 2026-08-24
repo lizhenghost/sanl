@@ -2,6 +2,7 @@ import sqlite3
 import json
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from typing import List, Optional
 
@@ -432,12 +433,22 @@ def count_cf_endpoints() -> int:
 
 def init_db():
     """初始化数据库，创建表结构"""
-    global DB_PATH
+    global DB_PATH, _POOL
     config = get_config()
     DB_PATH = config.get("database", {}).get("path", "./data/nodes.db")
-    
+
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    
+
+    # DB 路径可能变化：清空线程池里的旧连接
+    with _POOL_LOCK:
+        for c in _POOL_CONNS:
+            try:
+                c.close()
+            except Exception:
+                pass
+        _POOL_CONNS.clear()
+    _POOL = threading.local()  # 重置线程本地引用
+
     with get_connection() as conn:
         # 读取 schema SQL
         schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
@@ -448,25 +459,51 @@ def init_db():
         conn.commit()
 
 
-@contextmanager
-def get_connection():
-    """获取数据库连接（上下文管理器）"""
+_POOL = threading.local()
+_POOL_LOCK = threading.Lock()
+_POOL_CONNS = []  # 全部存活连接（弱管理，仅用于进程退出时关闭）
+
+
+def _new_conn():
+    """新建连接：NFS 存储上每次 connect+PRAGMA 约 15ms，必须池化复用"""
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 15000")
     try:
-        # 并发优化（附录：优化 #8 SQLite 侧）：busy_timeout 防写锁报错；WAL 提升读写并发（NFS 等不支持时静默降级）
-        conn.execute("PRAGMA busy_timeout = 15000")
+        conn.execute("PRAGMA journal_mode = WAL")
+    except Exception:
+        pass
+    return conn
+
+
+@contextmanager
+def get_connection():
+    """获取数据库连接（线程本地池化复用）。
+
+    - 同线程复用连接，省掉 NFS 上每次 ~15ms 的 connect+PRAGMA 开销
+    - 成功路径 commit；异常 rollback（与旧语义一致）
+    - 连接损坏（NFS 抖动/进程句柄失效）时自动重建一次
+    """
+    conn = getattr(_POOL, "conn", None)
+    if conn is not None:
         try:
-            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("SELECT 1").fetchone()
         except Exception:
-            pass
+            conn = None  # 连接已损坏，走重建
+    if conn is None:
+        conn = _new_conn()
+        _POOL.conn = conn
+        with _POOL_LOCK:
+            _POOL_CONNS.append(conn)
+    try:
         yield conn
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 
 # ===== Source CRUD =====
@@ -754,6 +791,8 @@ def create_token(user_id: Optional[int], token_str: str, name: str = "default",
                 "INSERT INTO tokens (user_id, token, name, permissions, expired_at) VALUES (?, ?, ?, ?, ?)",
                 (user_id, token_str, name, permissions, expired_at)
             )
+            invalidate_token_cache()
+            _QUOTA_CACHE.clear()
             return Token(id=cursor.lastrowid, user_id=user_id, token=token_str,
                          name=name, permissions=permissions, is_active=1)
         except Exception as e:
@@ -782,11 +821,15 @@ def list_tokens(user_id: Optional[int] = None) -> list:
 def toggle_token_active(token_id: int, is_active: int):
     with get_connection() as conn:
         conn.execute("UPDATE tokens SET is_active = ? WHERE id = ?", (is_active, token_id))
+    invalidate_token_cache()
+    _QUOTA_CACHE.clear()
 
 
 def delete_token(token_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM tokens WHERE id = ?", (token_id,))
+    invalidate_token_cache()
+    _QUOTA_CACHE.clear()
 
 
 def update_token_last_used(token_str: str):
@@ -795,24 +838,56 @@ def update_token_last_used(token_str: str):
                      (int(__import__('time').time()), token_str))
 
 
+_TOKEN_CACHE = {}  # token_str -> (expires_ts, info_dict|None)
+_TOKEN_LASTUSED = {}  # token_str -> last_written_ts（节流写，NFS 上每次 UPDATE 很贵）
+
+
+def invalidate_token_cache():
+    """Token 增删改时清空校验缓存"""
+    _TOKEN_CACHE.clear()
+
+
 def validate_token(token_str: str) -> Optional[dict]:
-    """验证 token 有效性，返回 token 信息或 None"""
+    """验证 token 有效性，返回 token 信息或 None。
+
+    NFS 存储上每次校验（含 last_used 写）实测 ~700ms，故：
+    - 校验结果进程内缓存 60s（token CRUD 时失效）
+    - last_used 节流：距上次落库 >300s 才写一次
+    """
+    import time as _t
+    now = _t.time()
+    hit = _TOKEN_CACHE.get(token_str)
+    if hit and hit[0] > now:
+        info = hit[1]
+        if info is not None:
+            _throttled_touch_last_used(token_str, now)
+        return info
+
     token = get_token_by_value(token_str)
-    if not token:
-        return None
-    if not token.is_active:
-        return None
-    if token.expired_at and int(__import__('time').time()) > token.expired_at:
-        return None
-    # 更新最后使用时间
-    update_token_last_used(token_str)
-    return {
-        "id": token.id,
-        "user_id": token.user_id,
-        "token": token.token,
-        "name": token.name,
-        "permissions": token.permissions
-    }
+    info = None
+    if token and token.is_active and not (token.expired_at and int(now) > token.expired_at):
+        info = {
+            "id": token.id,
+            "user_id": token.user_id,
+            "token": token.token,
+            "name": token.name,
+            "permissions": token.permissions
+        }
+    _TOKEN_CACHE[token_str] = (now + 60, info)
+    if info is not None:
+        _throttled_touch_last_used(token_str, now)
+    return info
+
+
+def _throttled_touch_last_used(token_str: str, now: float):
+    """last_used 节流写：300s 内不重复落库（重启后首次会写一次，可接受）"""
+    last = _TOKEN_LASTUSED.get(token_str, 0)
+    if now - last > 300:
+        _TOKEN_LASTUSED[token_str] = now
+        try:
+            update_token_last_used(token_str)
+        except Exception:
+            pass
 
 
 def clean_old_jobs(days: int = 7):
@@ -1119,22 +1194,36 @@ def log_sub_access(token_id, path: str, ua: str, bytes_out: int, node_count: int
             (token_id, int(__import__('time').time()), path[:200], (ua or "")[:200], bytes_out, node_count))
 
 
+_QUOTA_CACHE = {}  # token_id -> (expires_ts, quota_dict)
+
+
 def check_token_traffic_quota(token_id) -> dict:
-    """Token 流量配额检查（大纲 J.2 按流量限制）：traffic_limit_mb=0 表示不限流"""
+    """Token 流量配额检查（大纲 J.2 按流量限制）：traffic_limit_mb=0 表示不限流。
+
+    SUM(sub_access_log) 在 NFS 上 ~100ms+，结果缓存 60s（流量统计非精确计费场景）。
+    """
     if not token_id:
         return {"allowed": True}
+    import time as _t
+    now = _t.time()
+    hit = _QUOTA_CACHE.get(token_id)
+    if hit and hit[0] > now:
+        return hit[1]
     with get_connection() as conn:
         row = conn.execute("SELECT traffic_limit_mb FROM tokens WHERE id = ?", (token_id,)).fetchone()
         if not row:
             return {"allowed": True}
         limit_mb = float(row["traffic_limit_mb"] or 0)
         if limit_mb <= 0:
-            return {"allowed": True, "limit_mb": 0, "used_mb": 0}
-        used = conn.execute(
-            "SELECT COALESCE(SUM(bytes_out),0) FROM sub_access_log WHERE token_id = ?",
-            (token_id,)).fetchone()[0]
-        used_mb = used / (1024 * 1024)
-        return {"allowed": used_mb < limit_mb, "limit_mb": limit_mb, "used_mb": round(used_mb, 2)}
+            result = {"allowed": True, "limit_mb": 0, "used_mb": 0}
+        else:
+            used = conn.execute(
+                "SELECT COALESCE(SUM(bytes_out),0) FROM sub_access_log WHERE token_id = ?",
+                (token_id,)).fetchone()[0]
+            used_mb = used / (1024 * 1024)
+            result = {"allowed": used_mb < limit_mb, "limit_mb": limit_mb, "used_mb": round(used_mb, 2)}
+    _QUOTA_CACHE[token_id] = (now + 60, result)
+    return result
 
 
 def set_token_traffic_limit(token_id: int, limit_mb: float) -> bool:
@@ -1142,7 +1231,8 @@ def set_token_traffic_limit(token_id: int, limit_mb: float) -> bool:
     with get_connection() as conn:
         cur = conn.execute("UPDATE tokens SET traffic_limit_mb = ? WHERE id = ?",
                            (max(0.0, float(limit_mb)), token_id))
-        return cur.rowcount > 0
+    _QUOTA_CACHE.pop(token_id, None)  # 限额变更立即生效
+    return cur.rowcount > 0
 
 
 def token_access_stats(limit: int = 50) -> list:
