@@ -186,3 +186,18 @@
    - 延迟分布：0-100ms:9, 100-200ms:10, 200-400ms:10, 400-800ms:15
    - 仍低于 subs-check 750 的原因：候选池 http/vless 仍偏低（importer 已修复域名型解析，但 subs-check 订阅中的 http/vless 节点在管线中仍被部分丢弃）
    - 结论：候选池层面仍需进一步优化（尤其 vless），引擎内核探活能力已验证合格（B9 98%）
+
+## 2026-08-24 v2.5.1 — CI 全链路修复 + 列显隐浮层重构
+### GitHub Actions 修复（用户截图反馈 Android APK 失败）
+1. **Android/Windows workflow**：补 `permissions: contents: write` — 根因是默认 GITHUB_TOKEN 无 release 写权限，"Attach to release" 步骤报 Resource not accessible by integration。
+2. **CI workflow**：requirements.txt 补 `python-multipart` — FastAPI 表单上传端点（nodes/import/upload）需要，本地有装所以本地没暴露。
+3. 验证：tag v2.5.1 触发 4 workflow 全绿（CI / Build & Release / Android APK / Windows EXE），Release 附上 apk(3.1MB)/windows.zip(16MB)/源码包。
+
+### 前端列显隐浮层重构（根因深挖）
+- 旧版 `<details>`+absolute 面板被表格盖住：`.table-container` 的 `animation: fadeUp both`（终态 translateY(0) 残留）创建持久层叠上下文；且 Chrome 对**关闭的 details** 内容做 containment，`position:fixed` 的包含块变成 details 自身（实测 left:440 渲染在 x=880=440+440）。
+- 新版：面板改为**全局唯一、挂在 body 下**的 fixed 浮层（z-index 1500），JS 计算按钮位置定位、点外部收起、localStorage 持久化；fadeUp 终态改 `transform:none`。
+- 实测：开/关面板、取消国家列实时隐藏、恢复勾选、点外部收起全通过。
+
+### 回归
+- regression.sh 26/26 端点 200（含 POST edgetunnel/generate）
+- commits: 4b48795（修复主体）+ 7af8d4e（版本号 2.5.1）
