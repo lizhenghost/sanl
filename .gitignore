@@ -28,3 +28,4 @@ android/app/build/
 android/local.properties
 android/app/src/main/assets/config.json
 *.apk
+*_TODO.md
