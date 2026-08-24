@@ -43,13 +43,26 @@ class FetchedSource:
 class Scraper:
     def __init__(self, proxy_urls: Optional[List[str]] = None):
         self.proxy_urls = proxy_urls or []
-        self.client = httpx.AsyncClient(
+        self.client = self._make_client()
+
+    def _make_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
         )
+
+    async def _rebuild_client(self):
+        """长驻 AsyncClient 连接池可能因服务器半关闭连接而坏死（后续请求持续超时/断连），
+        重建 client 自愈。"""
+        try:
+            await self.client.aclose()
+        except Exception:
+            pass
+        self.client = self._make_client()
+        logger.warning("Scraper httpx client 已重建（连接池自愈）")
 
     async def fetch_github_raw(self, repo_url: str) -> Optional[FetchedSource]:
         """从 GitHub raw URL 获取订阅内容"""
@@ -175,8 +188,18 @@ class Scraper:
             resp.raise_for_status()
             return resp.text.strip()
         except Exception as e:
+            # httpx 超时类异常 str 为空，补异常类型便于排查
+            logger.error(f"Failed to fetch {url}: {type(e).__name__}: {e}")
+            # 连接池坏死自愈：重建 client 后重试一次
+            try:
+                await self._rebuild_client()
+                resp = await self.client.get(url)
+                resp.raise_for_status()
+                logger.info(f"重建连接后重试成功: {url}")
+                return resp.text.strip()
+            except Exception as e2:
+                logger.error(f"重建连接后重试仍失败 {url}: {type(e2).__name__}: {e2}")
             if "github" not in url:
-                logger.error(f"Failed to fetch {url}: {e}")
                 return None
             logger.warning(f"直连失败({e})，尝试镜像回退: {url}")
             for m in GH_MIRRORS:
@@ -274,8 +297,6 @@ class Scraper:
                 return await self.fetch_telegram_channel(url)
             if st == "rss" or url.endswith((".xml", "/rss", "/feed", "/atom")):
                 return await self.fetch_rss(url)
-            if st == "telegram" or "t.me/" in url:
-                return await self.fetch_telegram_channel(url)
             if "github.com" in url or "raw.githubusercontent.com" in url or st == "github":
                 content = await self._github_raw_content(url)
                 name = url.rstrip('/').split('/')[-1].split('?')[0] or f"github-{url.split('/')[-2]}"
