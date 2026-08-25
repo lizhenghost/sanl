@@ -32,6 +32,8 @@ jobs:
             --add-data "src;src" `
             --add-data "static;static" `
             --add-data "config;config" `
+            --add-data "presets;presets" `
+            --add-data "frontend;frontend" `
             main.py
           Compress-Archive -Path dist/Sanl.exe -DestinationPath dist/Sanl-windows.zip
 

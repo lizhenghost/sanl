@@ -20,7 +20,9 @@ SUB_PROTOCOLS = [
 ]
 
 # 静态数据源文件路径
-STATIC_SOURCES_FILE = "presets/free_sources.json"
+# 预置源清单：基于本文件定位（源码运行 / PyInstaller onefile 解压目录均有效，不依赖 cwd）
+STATIC_SOURCES_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "presets", "free_sources.json")
 STATIC_DIR = "data/static"
 
 # GitHub raw 被墙时的镜像加速前缀（依次回退）
