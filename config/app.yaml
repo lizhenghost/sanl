@@ -11,9 +11,9 @@ database:
 scheduler:
   auto_clean_days: 7
   check_backend: subs-check
-  check_cron: 0 * * * *
+  check_cron: 0 7,14,18 * * *  # 北京时间每天 7:00/14:00/18:00
   check_mode: speed
-  fetch_cron: 0 * * * *
+  fetch_cron: 0 7,14,18 * * *  # 北京时间每天 7:00/14:00/18:00
   qualified_latency_ms: 800
 sources:
   github:

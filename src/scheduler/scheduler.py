@@ -23,7 +23,7 @@ class Scheduler:
     def start(self):
         """启动调度器"""
         # 抓取任务
-        fetch_cron = self.config.get("fetch_cron", "0 */6 * * *")
+        fetch_cron = self.config.get("fetch_cron", "0 7,14,18 * * *")  # 北京时间
         self.sched.add_job(
             self._fetch_sources,
             CronTrigger(**self._parse_cron(fetch_cron)),
@@ -32,7 +32,7 @@ class Scheduler:
         )
         
         # 测速任务
-        check_cron = self.config.get("check_cron", "30 * * * *")
+        check_cron = self.config.get("check_cron", "0 7,14,18 * * *")  # 北京时间
         self.sched.add_job(
             self._run_check,
             CronTrigger(**self._parse_cron(check_cron)),
@@ -67,8 +67,11 @@ class Scheduler:
         self.sched.start()
         logger.info("Scheduler started")
 
+    # 所有定时任务统一按北京时间调度（用户要求 7:00/14:00/18:00 三次，不依赖容器时区）
+    TZ = "Asia/Shanghai"
+
     def _parse_cron(self, cron_str: str) -> dict:
-        """解析 cron 表达式为 APScheduler 参数"""
+        """解析 cron 表达式为 APScheduler 参数（北京时间）"""
         parts = cron_str.strip().split()
         if len(parts) != 5:
             return {}
@@ -78,7 +81,8 @@ class Scheduler:
             "hour": hour,
             "day": day,
             "month": month,
-            "day_of_week": weekday
+            "day_of_week": weekday,
+            "timezone": self.TZ,
         }
 
     async def _fetch_sources(self):
@@ -89,6 +93,14 @@ class Scheduler:
             await run_pool_import(scraper=self.scraper)
         except Exception as e:
             logger.error(f"Fetch failed: {e}")
+        # ⭐ 自动获取优选：抓取完成后自动对全部 CF 端点跑一轮延迟检测（同 7/14/18 节奏）
+        try:
+            import asyncio as _asyncio
+            from ..checker.cf_ping import ping_all
+            r = await ping_all(limit=20000)
+            logger.info(f"[cf-auto] 优选延迟检测完成: {r.get('alive', 0)}/{r.get('total', 0)} 存活")
+        except Exception as e:
+            logger.warning(f"[cf-auto] 优选延迟检测失败: {e}")
 
     async def _run_check(self):
         """运行测速检查（后台执行，不阻塞）；模式取 config scheduler.check_mode（默认 speed）"""

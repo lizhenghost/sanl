@@ -110,6 +110,17 @@ async def _import_one(sc: Scraper, src, summary: dict):
             n = repository.upsert_cf_endpoints(cf_eps, source_id=src.id, default_isp=src_isp)
             summary["cf_endpoints"] += n
 
+            # ⭐ 优选域名 → 自动解析全部 IP 入库（新加优选域名源即自动生效）
+            domains = [ep["host"] for ep in cf_eps if not _is_ip(ep.get("host", ""))]
+            if domains:
+                try:
+                    from ..engine.cf_hub import harvest_domains
+                    hr = await harvest_domains(domains, port=int(cf_eps[0].get("port", 443) or 443))
+                    summary["cf_resolved_ips"] = summary.get("cf_resolved_ips", 0) + hr.get("new_ips", 0)
+                    logger.info(f"[pool] 源 {src.name}: {len(domains)} 优选域名自动解析 → 新增 {hr.get('new_ips', 0)} IP")
+                except Exception as e:
+                    logger.warning(f"[pool] 源 {src.name} 优选域名解析失败: {e}")
+
         node_count = len(nodes)
         repository.update_source_status(src.id, 1, node_count)
         try:
@@ -130,3 +141,13 @@ async def _import_one(sc: Scraper, src, summary: dict):
             repository.record_source_failure(src.id)
         except Exception:
             pass
+
+
+def _is_ip(s: str) -> bool:
+    """host 是否已是 IP（域名/IPv6 判断用）"""
+    import ipaddress
+    try:
+        ipaddress.ip_address(str(s).strip("[]"))
+        return True
+    except (ValueError, TypeError):
+        return False

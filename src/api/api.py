@@ -172,9 +172,12 @@ async def create_source(source: SourceCreate):
 
 @api_router.get("/sources", response_model=List[models.Source])
 @cached(ttl=3)
-async def list_sources(enabled: bool = True):
-    """获取数据源列表"""
-    return repository.list_sources(enabled_only=enabled)
+async def list_sources(enabled: bool = True, include_manual: bool = False):
+    """获取数据源列表（默认排除 manual 手动导入/测试类——它们不是真实来源）"""
+    items = repository.list_sources(enabled_only=enabled)
+    if not include_manual:
+        items = [s for s in items if (s.source_type or "") != "manual"]
+    return items
 
 
 @api_router.put("/sources/{source_id}/enable")
