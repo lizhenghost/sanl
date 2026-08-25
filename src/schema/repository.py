@@ -299,10 +299,11 @@ def _parse_node_data(raw) -> dict:
 
 
 def list_nodes_missing_geo(limit: int = 300, status: str = "active") -> List[Node]:
-    """取国家/国家码尚未填充的节点（GeoIP 刷新优先补这些，避免对已正确节点做无效查询）"""
+    """取国家或国家码尚未填充的节点（GeoIP 刷新优先补这些，避免对已正确节点做无效查询）"""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM nodes WHERE status=? AND (country IS NULL OR country='') ORDER BY id ASC LIMIT ?",
+            "SELECT * FROM nodes WHERE status=? AND (country IS NULL OR country='' "
+            "OR country_code IS NULL OR country_code='') ORDER BY id ASC LIMIT ?",
             (status, limit),
         ).fetchall()
         nodes = []

@@ -3,6 +3,7 @@ FastAPI 主应用
 """
 import os
 import time
+import json
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File, Body
@@ -829,6 +830,35 @@ async def toggle_node_favorite(node_id: int):
         return {"status": "ok", "id": node_id, "favorite": fav}
     except ValueError:
         raise HTTPException(status_code=404, detail="Node not found")
+
+
+@api_router.get("/nodes/{node_id}")
+@cached(ttl=3)
+async def get_node_detail(node_id: int):
+    """节点详情（完整字段，含 node_data 原始配置）"""
+    n = repository.get_node(node_id)
+    if not n:
+        raise HTTPException(status_code=404, detail="node not found")
+    return {
+        "id": n.id, "node_name": n.node_name, "node_type": n.node_type,
+        "status": n.status, "country": n.country, "country_code": getattr(n, "country_code", None),
+        "latency": n.latency, "download_speed": n.download_speed, "score": n.score,
+        "fail_count": getattr(n, "fail_count", 0), "stream_flags": getattr(n, "stream_flags", None),
+        "source_id": n.source_id, "subscribe_url": getattr(n, "subscribe_url", None),
+        "last_checked_at": n.last_checked_at, "created_at": n.created_at,
+        "node_data": n.node_data if isinstance(n.node_data, dict) else _parse_maybe_json(n.node_data),
+    }
+
+
+def _parse_maybe_json(v):
+    if v is None:
+        return None
+    if isinstance(v, (dict, list)):
+        return v
+    try:
+        return json.loads(v)
+    except Exception:
+        return v
 
 
 @api_router.get("/nodes/{node_id}/history")
