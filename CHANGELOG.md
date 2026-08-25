@@ -1,107 +1,153 @@
-# Sanl Changelog
+# 更新日志 / Changelog
 
-## v2.5.2 - 2026-08-25
+所有显著变更都会记录在此文件中。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-### 🎲 源发现随机化
-- GitHub 仓库自动发现全面随机化：12 个短查询词池随机抽 2 + 动态随机翻页（按 total_count 计算）+ 查询间隔防限流
-- 高星优先：按星数降序取 top 2×N 池再随机抽 N 个，实测每次发现不同仓库（重叠 0），星数 2k~22k
-- 候选订阅路径从 2 个固定扩展为 12 个随机挑 2；支持 `GITHUB_TOKEN` 环境变量提升限流额度
-- 星数门槛不足时自动降级补齐（星多者优先），不再返回空结果
+## [Unreleased]
 
-### 📱 安卓 App 修复
-- 修复深链 intent-filter 声明了但代码未处理：外部分享面板链接现在能用 App 打开（校验 host 防任意跳转）
-- 修复下拉刷新与页面滚动冲突：页面未滚到顶部时禁用下拉刷新
-- 修复 WebView 泄漏：onDestroy 释放 WebView
+- （进行中的改动见 [commits](https://github.com/lizhenghost/sanl/commits/main)）
 
-### 🔧 后端修复
-- 修复内核引擎日志文件句柄泄漏（`kernel.py` stdout 句柄未保存无法关闭）
+## [v2.5.4] — 2026-08-25
 
-## v2.5.1 - 2026-08-24
+### ☁️ CF 优选中心三合一（重大功能）
 
-### 🔧 CI 修复
-- 修复 GitHub Actions `permissions` 缺失导致 Release 上传失败
-- 补装 `python-multipart` 依赖，4 个 workflow 全绿
-- Android APK（3.1MB）正式附带 Release 下载
-
-### 🎨 前端
-- 表格列显隐浮层重构（修复 `details` containment 导致的弹层裁剪）
-
-## v2.5.0 - 2026-08-23
-
-### ⚙️ 稳定性与性能
-- 健康检查增强：死源自动降权 + 存活率统计
-- 缓存层增强：TTL 命中率浮标实时展示
-- SQLite 查询优化：高频接口索引覆盖
-- 修复文件句柄泄漏（subs-check 子进程日志流）
-
-### 📱 安卓
-- GitHub Actions 自动构建 debug APK 并上传 Artifact
-
-## v2.4.3 - 2026-08-23
-
-### 📱 安卓
-- 新增 `android-build.yml`：PWA → TWA 打包 APK，Release 附 `Sanl-android.apk`
-
-## v2.4.2 - 2026-08-23
-
-### 🚀 边缘中继
-- 集成 [edgetunnel](https://github.com/zizifn/edgetunnel)：`POST /api/edgetunnel/generate` 从节点池取优质 vless/vmess+ws 节点，生成可部署到 CF Workers 的中继脚本
-- 前端新增 **🚀 CF Worker** Tab：配置节点数/UUID/故障转移 IP，一键生成、复制/下载 `worker.js`
-- 清理 5 个冗余 TODO 文档；修复 `static/index.html` ↔ `frontend/index.html` 循环软链接
-
-## v2.4.1 - 2026-08-23
-
-### 🔧 引擎修复
-- 活跃节点 12 → 44：importer 域名型解析 + 字段规范化 + 并发标定 + cfconvert 双 Tab
-- TLS 预检查过滤死节点（72.5% 通过），6 个探测端点覆盖国内外可达性
-- 修复订阅转换后端异常：Clash YAML 注释断行 + inline 缩进保留 + 单协议导出兼容 NekoBox/OneClick
-- 修复 Token 500（缺 traffic_limit_mb）+ 真分页 + Clash groups/rules + 趋势图全 0 + 流媒体检测 + 国旗/地图渲染
-- 新增源级测速开关 / max_sources / 续期天数
-
-## v2.4.0 - 2026-08-22
-
-### ⚡ 测速维度可选（本次核心）
-- `POST /api/check/run` 新增 `mode` 参数: `latency`(仅延迟) / `speed`(延迟+速度) / `full`(全量含流媒体)
-- 新增 `overrides` JSON body 白名单覆盖: concurrent/timeout/min-speed/download-mb/download-timeout/speed-concurrent 等
-- 前端测速页新增模式三选卡与高级参数面板；进度条显示当前模式徽章
-- 定时测速默认模式可配: `scheduler.check_mode`（默认 speed）
-
-### 🚀 测速提速
-- 结果文件等待从固定 60s 改为动态稳定检测(~15s)，轮询间隔 5s→3s
-- latency 模式跳过流媒体检测/IP 重命名/速度下载三大耗时项，**实测 97 秒完成 21362 节点全流程**
-
-### 🏷️ 品牌更名
-- 全项目 NodePool → **Sanl**：前端标题/logo、API 文档、日志、User-Agent、构建脚本、CI Release、docker-compose、README/CONTRIBUTING/STATUS
-
-### 📱 安卓 App (PWA)
-- Web App Manifest + Service Worker（根 scope，API 网络优先、静态离线缓存）
-- 应用图标(192/512 + maskable)、主题色、桌面快捷方式（立即测速/订阅输出）
-- README 新增安卓/iOS 安装指南与 TWA 打包 APK 说明
-## v2.0.0 - 2026-08-21
-
-### 🚀 Phase 2 新功能
-- **Token 鉴权系统** — 订阅链接 Token 保护（np_ 前缀 64 位 hex），支持创建/禁用/删除，`Authorization: Bearer` / `X-API-Key` / URL 参数三种传递方式
-- **多用户系统** — 用户注册/登录（SHA-256+salt 密码哈希），admin/user 角色权限，会话 token
-- **世界地图可视化** — ECharts 世界地图 + 节点散点分布 + 各国节点统计柱状图（`GET /api/map`）
-- **数据源管理面板** — 15 个预置免费节点源批量导入、Base64 粘贴导入、源健康度监控
-- **自动 GitHub Release** — GitHub Actions workflow + 本地打包脚本（tar.gz/zip）
-
-### 🔧 优化
-- 前端升级为 8 页面单页应用（仪表盘/节点/地图/数据源/测速/订阅/Token/用户）
-- 修复 schema.sql 中 latency/download_speed 列重复定义
-- 订阅输出页面支持格式/数量/最低评分参数化生成链接
+- **理念修正**：优选 IP 不再只是"加速素材"——新增一键转节点能力，可直接连接使用
+- 新增 `src/engine/cf_hub.py` 核心引擎：
+  - `harvest_domains`：批量解析大佬优选域名 → 域名背后全部任播 IP 自动入端点库（一个域名常含几十个 IP，全收）
+  - `find_cf_templates`：自动发现节点池中走 CF CDN 中转的模板节点（vless/vmess + ws + tls，按 uuid+Host+path 分组去重）
+  - `endpoints_to_nodes`：延迟最优端点 × 模板 → 节点变体（server=优选IP，Host/SNI=原机场域名）指纹去重入池
+- 新增 API：`GET /api/cf/hub`（一屏总览）、`POST /api/cf/harvest`（域名解析入库）、`POST /api/cf/to-nodes`（⭐ 一键转节点）
+- **前端合并**：「CF 优选中心」单页三区块流程 —— ①来源解析入库 → ②统一检测+端点池 → ③⭐转节点入池；网段扫描收进页内「高级」折叠入口，CF 相关导航页 3 → 2
+- 转出的变体节点与其他节点一起参加统一测速排名，可订阅、可直连
+- 实测数据：18 组模板 / 单次转换 30 变体 / 全量 TCPing 43,200 端点测活 73% 最优 2ms
 
 ### 🐛 修复
-- 修复前端 index.html 文件截断导致的 JS 语法错误
-- 修复世界地图 GeoJSON 未注册问题（动态加载 CDN world.json）
 
-## v1.0.0 - 2026-08-20
+- GeoIP 补全失效：`list_nodes_missing_geo` 查询条件漏掉 country_code 为空的节点，导致历史节点国家码永不补全；修复后 active 节点 country_code 覆盖率 10% → **100%**
+- 新增 `GET /api/nodes/{id}` 节点详情端点（含 node_data 原始配置）
 
-### Phase 1 MVP
-- FastAPI 后端 + SQLite + APScheduler 定时调度
-- subs-check 测速引擎桥接（子进程调用）
-- 免费节点源抓取与去重合并
-- 节点质量评分与排名（0-100 分）
-- Clash 订阅输出
-- Web 仪表盘（ECharts 图表）
-- nginx 反向代理 + Cloudflare Tunnel 公网访问
+## [v2.5.3] — 2026-08-25
+
+- 刷新 CF IP 段缓存（例行运行时数据）
+- 包含 v2.5.2 之后累积的跨平台适配与 GeoIP 修复
+
+## [v2.5.2] — 2026-08-24
+
+### ✨ 功能
+
+- 源发现（discover）随机化 + 高星仓库优先排序
+
+### 🐛 修复
+
+- 安卓端适配修复
+- subs-check 内核文件句柄泄漏修复
+- 抓取器连接池坏死自愈 + 错误日志带异常类型
+
+### 📝 文档
+
+- README 按 GitHub 高星项目规范重写（徽章/截图/FAQ/免责声明）
+- 补充 v2.4.1–v2.5.1 changelog 与 issue templates
+
+## [v2.5.1] — 2026-08-23
+
+### 🐛 修复
+
+- CI workflow permissions 缺失导致 Release 上传失败（Resource not accessible by integration）
+- python-multipart 依赖缺失导致源导入接口 500
+- 列显隐浮层重构（修复 details/containment 层级问题）
+- APK 构建并附上 Release（3.1MB debug 签名可直接安装）
+
+## [v2.5.0] — 2026-08-22
+
+### ⚡ 稳定性巡检（每日巡检机制首轮产出）
+
+- 健康检查增强
+- 后端缓存层增强
+- SQLite 查询优化
+- 文件句柄泄漏修复
+- 12/12 回归通过
+
+## [v2.4.3] — 2026-08-21
+
+- feat(android): APK 构建流水线 + 自动上传 GitHub Release
+
+## [v2.4.2] — 2026-08-20
+
+### ✨ 功能
+
+- **edgetunnel 集成**：`POST /api/edgetunnel/generate` 从节点池取优质节点生成可部署到 Cloudflare Workers 的 JS 边缘中继脚本；前端新增 🚀 CF Worker Tab，一键生成/复制/下载 worker.js
+- 本地测速选优 + CF 边缘快速中继互补架构
+
+### 🧹 清理
+
+- 移除 5 个冗余 TODO 文件
+- 修复 static/index.html ↔ frontend/index.html 循环软链接
+
+## [v2.4.1] — 2026-08-19
+
+### 🐛 修复（活跃节点数专项）
+
+- 活跃节点从 12 提升至 44+：importer 域名型 server 解析 + 字段规范化 + 并发超时标定
+- 节点状态机修复：unknown 状态永不降级导致 7417 个死节点统计失真
+- Token 接口 500（缺 traffic_limit_mb 字段）+ 真分页 + Clash 完整配置补全
+
+### ✨ 功能 / 性能
+
+- 后端 TTL 缓存层 + 前端缓存命中率浮标 + 自适应轮询节流
+- 测速并发提升：concurrent 120→240 / speed-concurrent 40→100
+- SPA 路由 fallback + PWA 更新机制 + node_data JSON 容错
+
+## [v2.4.0] — 2026-08-18
+
+### ✨ 功能
+
+- **测速维度可选**（latency/speed/full）+ 参数覆盖，测速提速至 97s 实测
+- **品牌更名 Sanl**
+- **安卓 PWA App**
+- 全局任务进度条系统（抓取/测速后台任务统一视图，前端悬浮进度条 2.5s 轮询）
+- 抓取频率改每小时整点 + 死源自动清理（fail≥5 自动禁用 24h）
+- 源健康度判定反转 bug 修复 + API 文档本地化（去 jsdelivr CDN 依赖）
+- 方案 v2.1 大纲 12 项功能实证落地
+
+## [v2.3.0] — 2026-08-17
+
+- 十项优化合集
+- 扫描崩溃修复
+- 全源测速 + 合格延迟可调（`POST /api/admin/apply-qualified-latency`）
+
+## [v2.2.3] — 2026-08-16
+
+- fix: 表格列被裁切不可滑——table-container 全局 overflow-x:auto + table min-width 兜底
+
+## [v2.2.2] — 2026-08-16
+
+- fix: GeoIP 域名出口识别失效
+- fix: 节点列表排序接口 500
+
+## [v2.2.1] — 2026-08-15
+
+- refactor: 前端信息架构重构 + 版本号链路修复
+
+## [v2.2.0] — 2026-08-14
+
+### ✨ 功能（平台成型）
+
+- **订阅转换功能上线**——平台正式分为两大模块（节点池聚合 + 订阅中心）
+- **测速实时进度系统**——前台(手动)/后台(定时)双模式
+- **CF 网段扫描器**（参考 CFData-WEB v1.7.8）：官方/非标优选 + 端口可选 + 并发控制 + 合格阈值 + TOP-N + Host 伪装下载测速 + cachefly 等 5 个测速网址 + /24 精简采样
+- **接入 bestcf + 090227 全部优选订阅**（32 新源，cf-list 共 45）+ CF 端点 TCP 延迟检测引擎
+- **CF 优选按运营商分类**（电信/移动/联通/三网）：isp 列 + 自动识别 + API 筛选 + 导出
+- 节点池导入架构重构：全源解析入库 + 指纹去重 + 测速不删库 + 10 格式导出
+- 白蓝主题 UI 重构 + 网络工具去重
+- CF 端点 IPv4/IPv6 分类（v6 方括号解析修复）
+- 测速定时改每 4 小时（0/4/8/12/16/20 点）
+
+### 🐛 修复
+
+- 前端异步加载器跨页竞态空指针崩溃
+- nginx 强制 HTTPS 跳转
+
+## [v2.1.0] — 2026-08-13
+
+- 首个正式发布 tag
+- 推送前清理：移除 GPL 二进制与会话 TODO 笔记
