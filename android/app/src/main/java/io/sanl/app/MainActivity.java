@@ -38,6 +38,16 @@ public class MainActivity extends AppCompatActivity {
             url = cfg.optString("url", DEFAULT_URL);
         } catch (Exception ignored) { }
 
+        // 深链：外部分享的面板链接用本应用打开（仅接受配置主机的 https 链接，防任意跳转）
+        try {
+            Uri base = Uri.parse(url);
+            Uri deep = getIntent() == null ? null : getIntent().getData();
+            if (deep != null && "https".equals(deep.getScheme())
+                    && base.getHost() != null && base.getHost().equals(deep.getHost())) {
+                url = deep.toString();
+            }
+        } catch (Exception ignored) { }
+
         WebView.setWebContentsDebuggingEnabled(false);
         web = new WebView(this);
         WebSettings s = web.getSettings();
@@ -104,6 +114,8 @@ public class MainActivity extends AppCompatActivity {
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT));
         refresh.setOnRefreshListener(() -> web.reload());
+        // 页面未滚动到顶部时禁用下拉刷新，避免页面中部下拉误触发刷新、与图表横滑手势冲突
+        refresh.setOnChildScrollUpCallback((parent, child) -> web.canScrollVertically(-1));
         return root;
     }
 
@@ -121,6 +133,18 @@ public class MainActivity extends AppCompatActivity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         web.saveState(outState);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 释放 WebView，防 Activity context 泄漏
+        if (web != null) {
+            web.loadUrl("about:blank");
+            web.removeAllViews();
+            web.destroy();
+            web = null;
+        }
+        super.onDestroy();
     }
 
     @Override

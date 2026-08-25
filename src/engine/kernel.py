@@ -148,9 +148,11 @@ class KernelManager:
         if not binary.exists():
             raise RuntimeError(f"内核二进制缺失: {binary}（运行时依赖，需安装）")
 
+        log_fh = open(self.workdir / "kernel.log", "ab")
+        self._log_fh = log_fh  # 保存引用，stop() 时关闭，防句柄泄漏
         self.proc = subprocess.Popen(
             [str(binary), "-f", str(cfg_path)],
-            stdout=open(self.workdir / "kernel.log", "ab"),
+            stdout=log_fh,
             stderr=subprocess.STDOUT,
             cwd=str(self.workdir),
             start_new_session=True)
@@ -192,6 +194,14 @@ class KernelManager:
             except Exception:
                 pass
         self.proc = None
+        # 关闭内核日志文件句柄（start() 中打开）
+        fh = getattr(self, "_log_fh", None)
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+            self._log_fh = None
 
     # ---------- 通道操作 ----------
 

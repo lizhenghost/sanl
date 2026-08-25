@@ -243,48 +243,84 @@ class Scraper:
 
     async def discover_github_sources(self, min_stars: int = 100, per_page: int = 15,
                                       token: str = "") -> list:
-        """GitHub 仓库自动发现（大纲 附录A#10/G.1）：搜索免费节点订阅仓库，返回候选列表"""
+        """GitHub 仓库自动发现：随机短查询词 + 动态随机翻页，星数高的优先，每次发现不同候选"""
+        import asyncio as _asyncio
+        import math
+        import os
+        import random
+        # 短查询词（GitHub 搜索为 AND 语义，词多结果骤减；宽泛词结果集大，随机页才有意义）
         queries = [
-            "clash subscribe free nodes",
-            "free proxy nodes subscription",
-            "v2ray free nodes aggregate",
+            "free nodes", "free proxy", "clash subscription", "v2ray subscription",
+            "free nodes clash", "proxy subscription", "免费节点", "节点订阅",
+            "clash 订阅", "sing-box subscription", "v2ray free", "airport subscription",
         ]
+        # 常见订阅文件候选路径（每仓库随机挑 2 个探测）
+        cand_paths = [
+            "clash.yaml", "config.yaml", "merge.yaml", "proxy.yaml",
+            "sub/mix", "sub/clash.yaml", "sub/list.txt",
+            "v2ray.txt", "sub.txt", "nodes.txt", "all.txt", "proxy.txt",
+        ]
+        token = token or os.environ.get("GITHUB_TOKEN", "")
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "Sanl"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        found, seen = [], set()
-        for q in queries:
+        picked_qs = random.sample(queries, k=min(2, len(queries)))
+        repos = {}
+
+        async def _search(q: str, page: int) -> dict:
+            resp = await self.client.get(
+                "https://api.github.com/search/repositories",
+                params={"q": q, "sort": "stars", "order": "desc",
+                        "per_page": 30, "page": page},
+                headers=headers, timeout=20.0)
+            return resp.json() if resp.status_code == 200 else {}
+
+        for q in picked_qs:
             try:
-                resp = await self.client.get(
-                    "https://api.github.com/search/repositories",
-                    params={"q": q, "sort": "stars", "order": "desc", "per_page": per_page},
-                    headers=headers, timeout=20.0)
-                if resp.status_code != 200:
-                    logger.warning(f"GitHub search '{q}' -> HTTP {resp.status_code}")
-                    continue
-                for repo in resp.json().get("items", []):
+                first = await _search(q, 1)
+                total = first.get("total_count", 0)
+                max_page = max(1, min(3, math.ceil(total / 30)))
+                page = random.randint(1, max_page)
+                data = first if page == 1 else await _search(q, page)
+                for repo in data.get("items", []):
                     full = repo.get("full_name", "")
                     stars = repo.get("stargazers_count", 0)
-                    if not full or full.lower() in seen or stars < min_stars:
+                    if not full or full.lower() in repos:
                         continue
-                    seen.add(full.lower())
-                    branch = repo.get("default_branch", "main")
-                    # 每仓库只保留最有希望的两个订阅文件路径（排除 README，避免重复源）
-                    repo_urls = [
-                        f"https://raw.githubusercontent.com/{full}/{branch}/clash.yaml",
-                        f"https://raw.githubusercontent.com/{full}/{branch}/sub/mix",
-                    ]
-                    for u in repo_urls:
-                        found.append({
-                            "repo": full,
-                            "stars": stars,
-                            "url": u,
-                            "desc": (repo.get("description") or "")[:80],
-                            "pushed_at": repo.get("pushed_at", ""),
-                        })
+                    repos[full.lower()] = {
+                        "full": full,
+                        "stars": stars,
+                        "branch": repo.get("default_branch", "main"),
+                        "desc": (repo.get("description") or "")[:80],
+                        "pushed_at": repo.get("pushed_at", ""),
+                    }
             except Exception as e:
                 logger.warning(f"GitHub search failed for '{q}': {e}")
-        logger.info(f"GitHub discovery: {len(found)} candidate files from {len(seen)} repos")
+            await _asyncio.sleep(3)  # 未认证 search API 限 10 req/min，防 403
+        # 星数门槛：先按 min_stars 过滤，不足 per_page 时降级补齐（星多者优先）
+        strict = [r for r in repos.values() if r["stars"] >= min_stars]
+        if len(strict) < per_page:
+            relaxed = sorted((r for r in repos.values() if r["stars"] < min_stars),
+                             key=lambda r: -r["stars"])
+            strict += relaxed[:per_page - len(strict)]
+        # 高星优先：按星数降序，从 top 2*per_page 池里随机取 per_page 个（高星为主且每次有变化）
+        ranked = sorted(strict, key=lambda r: -r["stars"])
+        pool = ranked[:max(per_page * 2, per_page)]
+        chosen = random.sample(pool, k=min(per_page, len(pool))) if pool else []
+        found = []
+        for repo in chosen:
+            full = repo["full"]
+            paths = random.sample(cand_paths, k=2)
+            for p in paths:
+                found.append({
+                    "repo": full,
+                    "stars": repo["stars"],
+                    "url": f"https://raw.githubusercontent.com/{full}/{repo['branch']}/{p}",
+                    "desc": repo["desc"],
+                    "pushed_at": repo["pushed_at"],
+                })
+        logger.info(f"GitHub discovery: {len(found)} candidate files from {len(chosen)} repos "
+                    f"(queries={picked_qs}, stars {min_stars}+)")
         return found
 
     async def fetch_source(self, url: str, source_type: str = "http") -> Optional[FetchedSource]:
