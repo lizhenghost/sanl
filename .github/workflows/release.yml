@@ -29,11 +29,26 @@ jobs:
         run: |
           python scripts/build_release.py
 
+      - name: Extract release notes for current tag
+        run: |
+          python3 - <<'PY'
+          import re, os
+          tag = os.environ['GITHUB_REF_NAME']
+          ch = open('CHANGELOG.md', encoding='utf-8').read()
+          m = re.search(rf'## \[{re.escape(tag)}\][^\n]*\n(.*?)(?=\n## |\Z)', ch, re.S)
+          if not m:
+              # 无对应段落时回退：取最新一个版本段
+              m = re.search(r'## \[(v[\d.]+)\][^\n]*\n(.*?)(?=\n## |\Z)', ch, re.S)
+          body = f'## Sanl {tag}\n\n{(m.group(1) if m else "详见 CHANGELOG.md").strip()}\n\n---\n📥 安装包见下方 Assets · 完整变更史见 [CHANGELOG.md](https://github.com/lizhenghost/sanl/blob/main/CHANGELOG.md)'
+          open('RELEASE_NOTES.md', 'w', encoding='utf-8').write(body)
+          print(f'release notes for {tag}: {len(body)} chars')
+          PY
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Sanl ${{ github.ref_name }}
-          body_path: CHANGELOG.md
+          body_path: RELEASE_NOTES.md
           files: |
             dist/sanl-*.tar.gz
             dist/sanl-*.zip
