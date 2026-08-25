@@ -54,6 +54,11 @@
         .sidebar-footer { margin-top: auto; padding-top: 20px; color: #94a3b8; font-size: 12px; }
         .nav-group { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .8px; padding: 14px 16px 6px; font-weight: 700; }
         .nav-group:first-child { padding-top: 2px; }
+        .module-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; padding:6px; background:var(--surface); border:1px solid var(--border); border-radius:14px; position:sticky; top:calc(10px + env(safe-area-inset-top,0px)); z-index:50; backdrop-filter:blur(10px); }
+        .mtab { border:none; background:transparent; color:var(--text-muted); font-size:13.5px; font-weight:600; padding:9px 16px; border-radius:10px; cursor:pointer; transition:all .18s ease; display:inline-flex; align-items:center; gap:6px; font-family:inherit; }
+        .mtab:hover { color:var(--primary); background:var(--hover); }
+        .mtab.active { background:linear-gradient(135deg,var(--primary),var(--accent)); color:#fff; box-shadow:0 3px 10px rgba(37,99,235,.28); }
+        @media (max-width:768px){ .module-tabs{ top:calc(64px + env(safe-area-inset-top,0px)); overflow-x:auto; flex-wrap:nowrap; -webkit-overflow-scrolling:touch; scrollbar-width:none; } .module-tabs::-webkit-scrollbar{display:none;} .mtab{white-space:nowrap;} }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: var(--surface); padding: 24px; border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); transition: transform .2s ease, box-shadow .2s ease; }
         .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
@@ -173,21 +178,20 @@
             <nav>
                 <div class="nav-group">📊 总览</div>
                 <div class="nav-item active" data-page="dashboard">📊 仪表盘</div>
-                <div class="nav-group">🧩 节点池</div>
+                <div class="nav-group" i18n-group="pool">🧩 节点池</div>
                 <div class="nav-item" data-page="nodes">🔗 节点列表</div>
                 <div class="nav-item" data-page="map">🌍 世界地图</div>
-                <div class="nav-item" data-page="sources">📡 节点源</div>
+                <div class="nav-item" data-page="sources">📡 来源管理</div>
+                <div class="nav-item" data-page="check">⚡ 测速任务</div>
+                <div class="nav-item" data-page="cfendpoints">☁️ CF 优选</div>
+                <div class="nav-group" i18n-group="sub">🔄 订阅转换</div>
+                <div class="nav-item" data-page="convert">🔄 订阅转换</div>
                 <div class="nav-item" data-page="subscribe">📥 订阅输出</div>
                 <div class="nav-item" data-page="tokens">🔑 令牌管理</div>
-                <div class="nav-item" data-page="check">⚡ 测速任务</div>
-                <div class="nav-group">📖 文档</div>
+                <div class="nav-group" i18n-group="dev">🛠 开发者工具</div>
+                <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
+                <div class="nav-item" data-page="sysstatus">💻 系统状态</div>
                 <a class="nav-item" href="/docs" target="_blank" style="text-decoration:none;color:inherit;">📚 API 文档</a>
-                <div class="nav-group">🛰 CF 优选</div>
-                <div class="nav-item" data-page="cfendpoints">☁️ CF 优选中心</div>
-                <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
-                <div class="nav-group">🔁 转换工具</div>
-                <div class="nav-item" data-page="convert">🔄 订阅转换</div>
-                <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
             </nav>
             <div class="sidebar-footer">
                 <div id="last-check">最近检查: --</div>
@@ -229,24 +233,60 @@
 
         function goPage(page) {
             currentPage = page;
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.page === page));
-            document.querySelectorAll('#bottom-tab > div').forEach(d => d.classList.toggle('active', d.dataset.page === page));
+            document.querySelectorAll('nav:not(#bottom-tab) .nav-item[data-page]').forEach(i => i.classList.toggle('active', i.dataset.page === page));
+            document.querySelectorAll('#bottom-tab > div').forEach(d => {
+                const mod = moduleOf(d.dataset.page);
+                d.classList.toggle('active', !!(mod && (mod.home === page || mod.pages.some(p => p.id === page))));
+            });
             renderPage(page);
+            try { window.scrollTo({top:0, behavior:'smooth'}); } catch(e){}
         }
+        // ===== 四大模块信息架构 =====
+        const MODULES = [
+            { id:'dashboard', icon:'📊', zh:'仪表盘', en:'Dashboard', home:'dashboard', pages:[] },
+            { id:'pool', icon:'🧩', zh:'节点池', en:'Node Pool', home:'nodes', pages:[
+                {id:'nodes', icon:'🔗', zh:'节点列表', en:'Nodes'},
+                {id:'map', icon:'🌍', zh:'世界地图', en:'Map'},
+                {id:'sources', icon:'📡', zh:'来源管理', en:'Sources'},
+                {id:'check', icon:'⚡', zh:'测速任务', en:'Speed Test'},
+                {id:'cfendpoints', icon:'☁️', zh:'CF 优选', en:'CF Hub'},
+            ]},
+            { id:'sub', icon:'🔄', zh:'订阅转换', en:'Subscription', home:'convert', pages:[
+                {id:'convert', icon:'🔄', zh:'订阅转换', en:'Convert'},
+                {id:'subscribe', icon:'📥', zh:'订阅输出', en:'Output'},
+                {id:'tokens', icon:'🔑', zh:'令牌管理', en:'Tokens'},
+            ]},
+            { id:'dev', icon:'🛠️', zh:'开发者工具', en:'Developer', home:'cfworker', pages:[
+                {id:'cfworker', icon:'🚀', zh:'CF Worker', en:'CF Worker'},
+                {id:'sysstatus', icon:'💻', zh:'系统状态', en:'System'},
+            ]},
+        ];
+        function moduleOf(page){ return MODULES.find(m => m.home===page || m.pages.some(p=>p.id===page)); }
+
         function renderPage(page) {
+            if (page === 'cfscan') page = 'cfendpoints';
+            const mod = moduleOf(page);
+            // 模块内子导航条（多页模块才显示；移动端主要靠它切换）
+            let subnav = '';
+            if (mod && mod.pages.length > 1) {
+                subnav = `<div class="module-tabs">${mod.pages.map(pp => `
+                    <button class="mtab ${pp.id===page?'active':''}" onclick="goPage('${pp.id}')">${pp.icon} <span i18n="${pp.id}">${pp.zh}</span></button>`).join('')}</div>`;
+            }
             const main = document.getElementById('main-content');
+            main.innerHTML = `${subnav}<div id="page-body"></div>`;
+            const body = document.getElementById('page-body');
             switch(page) {
-                case 'dashboard': renderDashboard(main); break;
-                case 'nodes': renderNodes(main); break;
-                case 'map': renderMap(main); break;
-                case 'sources': renderSources(main); break;
-                case 'cfendpoints': renderCfEndpoints(main); break;
-                case 'cfscan': renderPage('cfendpoints'); break;
-                case 'check': renderCheck(main); break;
-                case 'convert': renderConvert(main); break;
-                case 'cfworker': renderCfWorker(main); break;
-                case 'subscribe': renderSubscribe(main); break;
-                case 'tokens': renderTokens(main); break;
+                case 'dashboard': renderDashboard(body || main); break;
+                case 'nodes': renderNodes(body || main); break;
+                case 'map': renderMap(body || main); break;
+                case 'sources': renderSources(body || main); break;
+                case 'cfendpoints': renderCfEndpoints(body || main); break;
+                case 'check': renderCheck(body || main); break;
+                case 'convert': renderConvert(body || main); break;
+                case 'cfworker': renderCfWorker(body || main); break;
+                case 'subscribe': renderSubscribe(body || main); break;
+                case 'tokens': renderTokens(body || main); break;
+                case 'sysstatus': renderSysStatus(body || main); break;
             }
         }
 
@@ -1822,7 +1862,7 @@
             const savedTab = sessionStorage.getItem('cv_tab') || 'normal';
             main.innerHTML = `
                 <div class="page-header"><h1 class="page-title">🔁 订阅转换</h1>
-                    <button class="btn btn-secondary" onclick="renderConvert(document.getElementById('main-content'))">🔄 重置</button>
+                    <button class="btn btn-secondary" onclick="goPage('convert')">🔄 重置</button>
                 </div>
                 <div class="flex" style="gap:8px;margin-bottom:16px;">
                     <button class="btn ${savedTab!=='premium'?'btn-primary':'btn-secondary'}" id="cv-tab-normal" onclick="switchConvertTab('normal')">📮 普通订阅转换</button>
@@ -1845,7 +1885,7 @@
         function renderNormalConvert(pane) {
             pane.innerHTML = `
                 <div class="page-header"><h1 class="page-title">🔁 订阅转换</h1>
-                    <button class="btn btn-secondary" onclick="renderConvert(document.getElementById('main-content'))">🔄 重置</button>
+                    <button class="btn btn-secondary" onclick="goPage('convert')">🔄 重置</button>
                 </div>
                 <div class="chart-container">
                     <div style="font-weight:600;margin-bottom:6px;">📥 输入</div>
@@ -2233,14 +2273,16 @@
 
         // ===== 🌒 主题切换 + i18n + 📱 底部Tab（v2.3）=====
         const I18N = {
-            zh: { overview:'总览', pool:'节点池', cf:'CF 优选', tools:'转换工具',
-                  dashboard:'仪表盘', nodes:'节点列表', map:'世界地图', sources:'节点源',
-                  subscribe_out:'订阅输出', tokens:'令牌管理', check:'测速任务',
-                  cfendpoints:'CF优选中心', convert:'订阅转换' },
-            en: { overview:'Overview', pool:'Sanl', cf:'CF Preferred', tools:'Tools',
-                  dashboard:'Dashboard', nodes:'Nodes', map:'World Map', sources:'Sources',
-                  subscribe_out:'Subscribe', tokens:'Tokens', check:'Speed Test',
-                  cfendpoints:'CF Hub', convert:'Convert' }
+            zh: { dashboard:'仪表盘', nodes:'节点列表', map:'世界地图', sources:'来源管理',
+                  check:'测速任务', cfendpoints:'CF 优选', convert:'订阅转换',
+                  subscribe:'订阅输出', tokens:'令牌管理', cfworker:'CF Worker',
+                  sysstatus:'系统状态', m_dashboard:'仪表盘', m_pool:'节点池',
+                  m_sub:'订阅转换', m_dev:'开发者' },
+            en: { dashboard:'Dashboard', nodes:'Nodes', map:'Map', sources:'Sources',
+                  check:'Speed Test', cfendpoints:'CF Hub', convert:'Convert',
+                  subscribe:'Output', tokens:'Tokens', cfworker:'CF Worker',
+                  sysstatus:'System', m_dashboard:'Dashboard', m_pool:'Pool',
+                  m_sub:'Subscribe', m_dev:'Dev' }
         };
         let curLang = localStorage.getItem('np_lang') || 'zh';
         function applyLang() {
@@ -2254,9 +2296,17 @@
         function toggleLang() {
             curLang = curLang === 'zh' ? 'en' : 'zh';
             localStorage.setItem('np_lang', curLang);
-            document.querySelectorAll('.nav-group').forEach((el,i) => {
-                const keys = ['overview','pool','cf','tools'];
-                if (keys[i]) el.textContent = I18N[curLang][keys[i]];
+            document.querySelectorAll('.nav-group[i18n-group]').forEach(el => {
+                const k = el.getAttribute('i18n-group');
+                const names = { pool:{zh:'🧩 节点池',en:'🧩 Node Pool'},
+                                sub:{zh:'🔄 订阅转换',en:'🔄 Subscription'},
+                                dev:{zh:'🛠 开发者工具',en:'🛠 Developer'} };
+                if (names[k]) el.textContent = names[k][curLang];
+            });
+            // 模块子导航条即时翻译
+            document.querySelectorAll('.mtab span[i18n]').forEach(el => {
+                const d = I18N[curLang]; const k = el.getAttribute('i18n');
+                if (d && d[k]) el.textContent = d[k];
             });
             document.querySelectorAll('nav:not(#bottom-tab) .nav-item').forEach(el => {
                 const p = el.dataset.page; if (I18N[curLang][p]) {
@@ -2323,12 +2373,10 @@
         setInterval(refreshSidebarStats, 10000);  // 刷新提速：30s→10s
     </script>
 <nav id="bottom-tab">
-    <div data-page="dashboard" onclick="btGo(this)">📊<span i18n="dashboard">仪表盘</span></div>
-    <div data-page="nodes" onclick="btGo(this)">🔗<span i18n="nodes">节点</span></div>
-    <div data-page="subscribe" onclick="btGo(this)">📥<span i18n="subscribe_out">输出</span></div>
-    <div data-page="cfendpoints" onclick="btGo(this)">🌐<span i18n="cfendpoints">优选</span></div>
-    <div data-page="convert" onclick="btGo(this)">🔄<span i18n="convert">转换</span></div>
-    <div data-page="cfworker" onclick="btGo(this)">🚀<span i18n="cfworker">Worker</span></div>
+    <div data-page="dashboard" onclick="btGo(this)">📊<span i18n="m_dashboard">仪表盘</span></div>
+    <div data-page="nodes" onclick="btGo(this)">🧩<span i18n="m_pool">节点池</span></div>
+    <div data-page="convert" onclick="btGo(this)">🔄<span i18n="m_sub">订阅转换</span></div>
+    <div data-page="cfworker" onclick="btGo(this)">🛠<span i18n="m_dev">开发者</span></div>
 </nav>
 <!-- 全局任务进度条（抓取/测速等后台任务实时视图） -->
 <div id="global-tasks" style="position:fixed;top:0;left:0;right:0;z-index:9999;pointer-events:none;"></div>
@@ -2410,7 +2458,48 @@ pollGlobalTasks();
 })();
 
 // ===== 🚀 CF Worker 部署 =====
-function renderCfWorker(main) {
+        // ===== 💻 系统状态（开发者工具） =====
+        async function renderSysStatus(main) {
+            main.innerHTML = `
+                <div class="page-header"><h1 class="page-title">💻 系统状态</h1>
+                    <button class="btn btn-secondary" onclick="goPage('sysstatus')">🔄 刷新</button></div>
+                <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+                    <div class="stat-card"><div class="stat-value" id="ss-version">—</div><div class="stat-label">版本</div></div>
+                    <div class="stat-card"><div class="stat-value" id="ss-uptime">—</div><div class="stat-label">运行时长</div></div>
+                    <div class="stat-card"><div class="stat-value" id="ss-db">—</div><div class="stat-label">数据库</div></div>
+                    <div class="stat-card"><div class="stat-value" id="ss-nodes">—</div><div class="stat-label">节点总数</div></div>
+                    <div class="stat-card"><div class="stat-value" id="ss-hit">—</div><div class="stat-label">缓存命中率</div></div>
+                </div>
+                <div class="chart-container"><h3 style="margin-bottom:8px;">🗄 缓存详情</h3>
+                    <div id="ss-cache-detail" class="text-muted" style="font-size:13px;">加载中…</div></div>
+                <div class="chart-container"><h3 style="margin-bottom:8px;">⚙️ 后台任务（最近）</h3>
+                    <div id="ss-tasks" class="text-muted" style="font-size:13px;">加载中…</div></div>`;
+            const fmtDur = sec => { if (sec == null) return '—'; const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); return h ? `${h}h ${m}m` : `${m}m`; };
+            try {
+                const v = await (await fetch(`${API}/version`)).json();
+                document.getElementById('ss-version').textContent = v.version || '—';
+                document.getElementById('ss-uptime').textContent = fmtDur(v.uptime_seconds);
+            } catch(e){}
+            try {
+                const db = await (await fetch(`${API}/health/db`)).json();
+                document.getElementById('ss-db').textContent = db.status === 'ok' ? '✅ 正常' : '❌ 异常';
+                if (db.total_nodes != null) document.getElementById('ss-nodes').textContent = db.total_nodes.toLocaleString();
+            } catch(e){ document.getElementById('ss-db').textContent = '❌ 异常'; }
+            try {
+                const c = await (await fetch(`${API}/cache/status`)).json();
+                const hits = c.hit ?? 0, misses = c.miss ?? 0, total = hits + misses;
+                document.getElementById('ss-hit').textContent = total > 0 ? Math.round(hits*100/total) + '%' : '—';
+                document.getElementById('ss-cache-detail').innerHTML =
+                    `命中 ${hits} · 未命中 ${misses} · 当前条目 ${c.size ?? '—'} · TTL 策略：读多写少接口 3~10s，写操作即失效`;
+            } catch(e){ document.getElementById('ss-cache-detail').textContent = '加载失败'; }
+            try {
+                const t = await (await fetch(`${API}/tasks`)).json();
+                const rows = (t.recent||[]).map(x => `<div style="padding:4px 0;border-bottom:1px dashed var(--border);">${x.name} — ${x.phase==='done'?'✅':x.phase==='running'?'⏳':'·'} ${x.detail||''} (${Math.round(x.elapsed||0)}s)</div>`).join('') || '<div>暂无记录</div>';
+                document.getElementById('ss-tasks').innerHTML = rows + ((t.active||[]).length ? `<div style="margin-top:6px;">🟢 活动中：${t.active.map(a=>a.name).join('、')}</div>` : '');
+            } catch(e){ document.getElementById('ss-tasks').textContent = '加载失败'; }
+        }
+
+        function renderCfWorker(main) {
     main.innerHTML = `
         <div style="padding:24px;max-width:900px;">
             <div class="page-header"><h1 class="page-title">🚀 CF Worker 部署</h1>
