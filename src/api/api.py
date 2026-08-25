@@ -345,7 +345,26 @@ async def discover_sources(min_stars: int = Query(100, ge=0), per_page: int = Qu
     new_items = [c for c in candidates if c["url"] not in existing]
     added = 0
     if auto_add:
-        for c in new_items[:10]:
+        # 入库前探测：404 / HTML 页面（README 误发现）不入库，避免僵尸零节点源
+        import asyncio as _asyncio
+
+        async def _probe(c: dict) -> bool:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                    r = await client.get(c["url"], headers={"User-Agent": "Sanl"})
+                if r.status_code != 200:
+                    return False
+                head = r.text[:500].lstrip()
+                return not head.startswith(("<!DOCTYPE", "<html", "# Free", "# Zhuhai")) or any(
+                    k in head[:200] for k in ("vless://", "vmess://", "ss://", "trojan://", "proxies:", ":443#", "hysteria")
+                )
+            except Exception:
+                return False
+
+        results = await _asyncio.gather(*[_probe(c) for c in new_items[:15]])
+        valid = [c for c, ok in zip(new_items[:15], results) if ok]
+        for c in valid[:10]:
             if repository.add_source(name=f"[discover] {c['repo']}", url=c["url"], source_type="github"):
                 added += 1
     return {"candidates": len(candidates), "new": len(new_items),

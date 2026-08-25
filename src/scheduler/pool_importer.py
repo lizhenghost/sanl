@@ -122,8 +122,8 @@ async def _import_one(sc: Scraper, src, summary: dict):
                     logger.warning(f"[pool] 源 {src.name} 优选域名解析失败: {e}")
 
         node_count = len(nodes)
-        # cf-list 源贡献的是 CF 端点而非代理节点：node_count 记录端点数（否则来源列表恒显示 0）
-        display_count = len(cf_eps) if src.source_type == "cf-list" else node_count
+        # 来源节点数 = max(代理节点数, CF端点数)：static/github 的优选文件源只产端点，否则显示恒 0
+        display_count = max(node_count, len(cf_eps))
         repository.update_source_status(src.id, 1, display_count)
         try:
             repository.record_source_success(src.id)
