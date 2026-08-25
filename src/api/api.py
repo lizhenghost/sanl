@@ -4,6 +4,7 @@ FastAPI 主应用
 import os
 import time
 import json
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, UploadFile, File, Body
@@ -501,6 +502,68 @@ async def export_cf_endpoints(
         media_type="text/plain; charset=utf-8",
         headers={"Cache-Control": "no-cache"}
     )
+
+
+# ---------- ☁️ CF 优选中心（三合一：来源导入→统一检测→转节点入池） ----------
+from ..engine import cf_hub
+
+
+@api_router.get("/cf/hub")
+@cached(ttl=5)
+async def cf_hub_overview():
+    """优选中心一屏总览：端点统计 / 模板节点 / 最近检测概况"""
+    templates = cf_hub.find_cf_templates()
+    alive = repository.get_cf_endpoints(limit=1, only_alive=True, sort="latency")
+    return {
+        "endpoints_total": repository.count_cf_endpoints(),
+        "by_isp": repository.cf_isp_stats(),
+        "by_ip_version": repository.cf_ip_version_stats(),
+        "templates": len(templates),
+        "template_names": [t["node_name"] for t in templates[:10]],
+        "has_alive_endpoints": bool(alive),
+        "scan_running": bool(cf_scanner.STATE["running"]),
+    }
+
+
+@api_router.post("/cf/harvest")
+async def cf_harvest(
+    background_tasks: BackgroundTasks,
+    domains: str = Query("", description="优选域名/IP，逗号或换行分隔，如 cf.090227.xyz,ip.sb"),
+    port: int = Query(443, ge=1, le=65535),
+):
+    """解析大佬优选域名 → 全部 IP 入优选库（一个域名常含几十个任播 IP，全收）"""
+    dl = [x.strip() for x in (domains or "").replace("\n", ",").split(",") if x.strip()]
+    if not dl:
+        raise HTTPException(status_code=400, detail="请提供至少一个优选域名")
+
+    async def _run():
+        try:
+            await cf_hub.harvest_domains(dl, port=port)
+            invalidate_all()
+        except Exception as e:
+            logger.error(f"[cf-hub] harvest 失败: {e}")
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "domains": len(dl),
+            "message": f"正在解析 {len(dl)} 个域名并入库，稍后刷新列表查看"}
+
+
+@api_router.post("/cf/to-nodes")
+async def cf_to_nodes(
+    top_n: int = Query(50, ge=1, le=500, description="取延迟最优 TOP N 端点"),
+    max_per_template: int = Query(10, ge=1, le=100),
+    isp: str = Query("any", pattern="^(telecom|mobile|unicom|all|any)$"),
+):
+    """
+    ⭐ 优质优选 IP 直接变成可用节点：
+    自动发现节点池中的 CF 中转模板(vless/vmess+ws+tls)，把 server 替换为优选 IP
+    生成变体节点去重入池 → 参加统一测速排名 → 可直接订阅使用
+    """
+    result = await asyncio.to_thread(
+        cf_hub.endpoints_to_nodes,
+        top_n=top_n, max_per_template=max_per_template, isp=isp)
+    invalidate_all()
+    return result
 
 
 # ===== 节点接口 =====

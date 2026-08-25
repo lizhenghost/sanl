@@ -183,8 +183,8 @@
                 <div class="nav-group">📖 文档</div>
                 <a class="nav-item" href="/docs" target="_blank" style="text-decoration:none;color:inherit;">📚 API 文档</a>
                 <div class="nav-group">🛰 CF 优选</div>
-                <div class="nav-item" data-page="cfendpoints">🌐 优选端点</div>
-                <div class="nav-item" data-page="cfscan">🔍 网段扫描</div>
+                <div class="nav-item" data-page="cfendpoints">☁️ CF 优选中心</div>
+                <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
                 <div class="nav-group">🔁 转换工具</div>
                 <div class="nav-item" data-page="convert">🔄 订阅转换</div>
                 <div class="nav-item" data-page="cfworker">🚀 CF Worker</div>
@@ -241,7 +241,7 @@
                 case 'map': renderMap(main); break;
                 case 'sources': renderSources(main); break;
                 case 'cfendpoints': renderCfEndpoints(main); break;
-                case 'cfscan': renderCfScan(main); break;
+                case 'cfscan': renderPage('cfendpoints'); break;
                 case 'check': renderCheck(main); break;
                 case 'convert': renderConvert(main); break;
                 case 'cfworker': renderCfWorker(main); break;
@@ -839,13 +839,28 @@
         // ===== 🌐 CF 优选端点（独立页） =====
         function renderCfEndpoints(main) {
             main.innerHTML = `
-                <div class="page-header"><h1 class="page-title">🌐 CF 优选端点库</h1>
-                    <button class="btn btn-secondary" onclick="renderCfEndpoints(document.getElementById('main-content'))">🔄 刷新</button>
+                <div class="page-header"><h1 class="page-title">☁️ CF 优选中心</h1>
+                    <div class="flex">
+                        <button class="btn btn-secondary" onclick="renderPage('cfendpoints')">🔄 刷新</button>
+                        <button class="btn btn-secondary" onclick="openCfScanLegacy()">🛰 高级：网段扫描</button>
+                    </div>
                 </div>
-                <div id="cf-isp-cards" class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));"></div>
+                <div id="cf-hub-stats" class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));"></div>
+                <!-- ① 来源导入 -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom:8px;">① 📥 优选来源 → 解析入库</h3>
+                    <p class="text-muted" style="font-size:12px;margin-bottom:8px;">粘贴大佬分享的优选域名（每行一个或逗号分隔），自动解析出域名背后的全部任播 IP 入库；也可直接粘 IP。入库后点「⚡ 统一检测」测出真实延迟。</p>
+                    <textarea class="form-input" id="cf-harvest-input" rows="3" style="width:100%;font-family:monospace;font-size:13px;" placeholder="cf.090227.xyz&#10;cf.xiu2.xyz&#10;104.16.0.1"></textarea>
+                    <div class="flex mt-4" style="align-items:center;">
+                        <button class="btn btn-primary" onclick="harvestCf(this)">📥 解析并入库</button>
+                        <label class="text-muted" style="font-size:13px;">端口
+                            <input class="form-input" type="number" id="cf-harvest-port" value="443" min="1" max="65535" style="width:80px;margin-left:6px;"></label>
+                    </div>
+                </div>
+                <!-- ② 统一检测 + 端点表 -->
                 <div class="chart-container">
                     <div class="flex" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-                        <h3 style="margin-right:auto;">📡 按运营商筛选</h3>
+                        <h3 style="margin-right:auto;">② ⚡ 统一检测与端点池</h3>
                         <select class="form-input" style="width:150px;" id="cf-isp-filter" onchange="renderCfTable()">
                             <option value="any">全部来源</option>
                             <option value="telecom">📶 电信优选</option>
@@ -865,16 +880,71 @@
                         <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:4px;">
                             <input type="checkbox" id="cf-only-alive" onchange="loadCfEndpoints()">仅存活
                         </label>
-                        <button class="btn btn-primary" id="cf-ping-btn" onclick="pingCfEndpoints(this)">⚡ 测延迟</button>
+                        <button class="btn btn-primary" id="cf-ping-btn" onclick="pingCfEndpoints(this)">⚡ 统一检测</button>
                         <button class="btn btn-secondary" onclick="copyCfEndpoints()">📋 复制当前</button>
                         <a class="btn btn-secondary" id="cf-export-btn" href="#" target="_blank">⬇️ 导出 txt</a>
                     </div>
-                    <p class="text-muted" style="font-size:12px;margin-bottom:8px;">CF 优选 IP/域名仅用于加速自建节点/优选工具，不是可直连的代理节点；延迟为 TCP 握手 RTT（本机视角），每轮「全量导入」自动刷新列表</p>
-                    <div class="table-container" style="max-height:520px;overflow-y:auto;"><table><thead><tr>
+                    <div class="table-container" style="max-height:420px;overflow-y:auto;"><table><thead><tr>
                         <th>延迟</th><th>版本</th><th>端点</th><th>备注</th><th>运营商</th><th>最近发现</th>
                     </tr></thead><tbody id="cf-tbody"></tbody></table></div>
+                </div>
+                <!-- ③ 转节点入池 -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom:8px;">③ ⭐ 优质 IP 直接变节点（入池参加统一测速）</h3>
+                    <p class="text-muted" style="font-size:12px;margin-bottom:10px;">自动发现节点池中走 CF 中转的节点作为模板，把 server 替换为检测最优的优选 IP，生成可直接使用的节点变体并入节点池 —— 与其他节点一起参加测速排名，可订阅、可直连，不再只是加速素材。需先完成「⚡ 统一检测」且池内存在 vless/vmess+ws+tls 模板。</p>
+                    <div class="flex" style="align-items:center;flex-wrap:wrap;gap:8px;">
+                        <label class="text-muted" style="font-size:13px;">取最优 TOP
+                            <input class="form-input" type="number" id="cf-tonodes-topn" value="50" min="1" max="500" style="width:90px;margin:0 6px;"></label>
+                        <label class="text-muted" style="font-size:13px;">每模板上限
+                            <input class="form-input" type="number" id="cf-tonodes-cap" value="10" min="1" max="100" style="width:80px;margin:0 6px;"></label>
+                        <button class="btn btn-primary" id="cf-tonodes-btn" onclick="toNodesCf(this)">⭐ 一键转节点入池</button>
+                    </div>
+                    <details style="margin-top:12px;">
+                        <summary class="text-muted" style="cursor:pointer;font-size:13px;">🛰 高级：CF 官方网段扫描 / 非标自定义网段探测（原独立页功能）</summary>
+                        <div class="flex mt-4">
+                            <button class="btn btn-secondary" onclick="openCfScanLegacy()">打开网段扫描器</button>
+                            <span class="text-muted" style="font-size:12px;" id="cf-scan-state-hint"></span>
+                        </div>
+                    </details>
                 </div>`;
             loadCfEndpoints();
+        }
+        async function openCfScanLegacy(){
+            // 网段扫描已合并进优选中心；此入口临时恢复渲染旧扫描器页面（保留全部功能）
+            const main = document.getElementById('main-content');
+            await renderCfScan(main);
+        }
+        async function harvestCf(btn){
+            const raw = (document.getElementById('cf-harvest-input')||{}).value || '';
+            const port = parseInt((document.getElementById('cf-harvest-port')||{}).value||'443',10);
+            if(!raw.trim()){ showToast('请先粘贴优选域名或 IP','error'); return; }
+            btn.disabled=true; btn.textContent='⏳ 解析中…';
+            try{
+                const res = await fetch(`${API}/cf/harvest?domains=${encodeURIComponent(raw)}&port=${port}`, {method:'POST'});
+                if(!res.ok) throw new Error(await res.text());
+                showToast('📥 已提交后台解析入库，稍后自动刷新','success');
+                setTimeout(()=>{ loadCfEndpoints(); btn.disabled=false; btn.textContent='📥 解析并入库'; }, 6000);
+            }catch(e){
+                showToast('❌ 入库失败: '+e.message,'error');
+                btn.disabled=false; btn.textContent='📥 解析并入库';
+            }
+        }
+        async function toNodesCf(btn){
+            const topn = parseInt((document.getElementById('cf-tonodes-topn')||{}).value||'50',10);
+            const cap = parseInt((document.getElementById('cf-tonodes-cap')||{}).value||'10',10);
+            const isp = (document.getElementById('cf-isp-filter')||{}).value || 'any';
+            btn.disabled=true; btn.textContent='⏳ 生成中…';
+            try{
+                const res = await fetch(`${API}/cf/to-nodes?top_n=${topn}&max_per_template=${cap}&isp=${isp}`, {method:'POST'});
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.detail||await res.text());
+                if(d.templates===0){ showToast('⚠️ '+(d.message||'无可用模板/端点'),'error'); }
+                else showToast(`✅ 已生成 ${d.variants_created} 个变体节点入池（新增 ${d.inserted}，去重 ${d.variants_created-d.inserted}），去「节点」页触发测速即可排名使用`,'success');
+            }catch(e){
+                showToast('❌ 转换失败: '+e.message,'error');
+            }finally{
+                btn.disabled=false; btn.textContent='⭐ 一键转节点入池';
+            }
         }
 
         // ===== CF 优选 =====
@@ -890,7 +960,7 @@
                 const d = await res.json();
                 cfData = d.endpoints||[];
                 const by = d.by_isp||{}, bv = d.by_ip_version||{};
-                const cards = document.getElementById('cf-isp-cards');
+                const cards = document.getElementById('cf-hub-stats');
                 if (cards) cards.innerHTML =
                     ['telecom','mobile','unicom','all'].map(k=>`
                       <div class="stat-card"><div class="stat-value">${by[k]||0}</div>
@@ -952,7 +1022,7 @@
             main.innerHTML = `
                 <div class="page-header"><h1 class="page-title">🛰 CF 网段扫描</h1>
                     <div class="flex">
-                        <button class="btn btn-secondary" onclick="renderPage('cfscan')">🔄 刷新</button>
+                        <button class="btn btn-secondary" onclick="openCfScanLegacy()">🔄 刷新</button>
                     </div>
                 </div>
                 <div class="chart-container">
@@ -2166,11 +2236,11 @@
             zh: { overview:'总览', pool:'节点池', cf:'CF 优选', tools:'转换工具',
                   dashboard:'仪表盘', nodes:'节点列表', map:'世界地图', sources:'节点源',
                   subscribe_out:'订阅输出', tokens:'令牌管理', check:'测速任务',
-                  cfendpoints:'优选端点', cfscan:'网段扫描', convert:'订阅转换' },
+                  cfendpoints:'CF优选中心', convert:'订阅转换' },
             en: { overview:'Overview', pool:'Sanl', cf:'CF Preferred', tools:'Tools',
                   dashboard:'Dashboard', nodes:'Nodes', map:'World Map', sources:'Sources',
                   subscribe_out:'Subscribe', tokens:'Tokens', check:'Speed Test',
-                  cfendpoints:'Endpoints', cfscan:'Subnet Scan', convert:'Convert' }
+                  cfendpoints:'CF Hub', convert:'Convert' }
         };
         let curLang = localStorage.getItem('np_lang') || 'zh';
         function applyLang() {
