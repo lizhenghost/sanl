@@ -400,6 +400,15 @@ def clear_scan_results() -> int:
         return n
 
 
+def count_cf_endpoints_by_source() -> dict:
+    """按来源统计 CF 端点数 {source_id: count}（cf-list 源 node_count 展示用）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT source_id, COUNT(*) FROM cf_endpoints WHERE source_id IS NOT NULL GROUP BY source_id"
+        ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,
                         default_isp: str = "all") -> int:
     """items: [{host, port, remark, isp?, ip_version?}]；行级 isp 优先，否则用来源级 default_isp"""
@@ -988,9 +997,13 @@ def record_source_failure(source_id: int, auto_disable_threshold: int = 5, disab
 
 
 def record_source_success(source_id: int):
-    """记录源抓取成功，重置失败计数"""
+    """记录源抓取成功，重置失败计数并确保启用（手动重试成功即恢复）"""
+    now = int(__import__('time').time())
     with get_connection() as conn:
-        conn.execute("UPDATE sources SET fail_count = 0 WHERE id = ?", (source_id,))
+        conn.execute(
+            "UPDATE sources SET fail_count = 0, enabled = 1, updated_at = ? WHERE id = ?",
+            (now, source_id)
+        )
 
 
 def reenable_expired_sources(disable_hours: int = 24):

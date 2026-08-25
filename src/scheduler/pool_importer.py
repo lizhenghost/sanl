@@ -37,9 +37,9 @@ async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional
     tid = "fetch"
     task_manager.start(tid, "📥 全量抓取源")
     try:
-        sources = repository.list_sources(enabled_only=True)
+        sources = repository.list_sources(enabled_only=(source_id is None))
         if source_id:
-            sources = [s for s in sources if s.id == source_id]
+            sources = [s for s in sources if s.id == source_id]  # 单源刷新允许重试已禁用源
         # 手动导入源不参与自动池导入（内容已在导入时入库）
         sources = [s for s in sources if s.source_type != "manual"]
         summary["sources_total"] = len(sources)
@@ -122,7 +122,9 @@ async def _import_one(sc: Scraper, src, summary: dict):
                     logger.warning(f"[pool] 源 {src.name} 优选域名解析失败: {e}")
 
         node_count = len(nodes)
-        repository.update_source_status(src.id, 1, node_count)
+        # cf-list 源贡献的是 CF 端点而非代理节点：node_count 记录端点数（否则来源列表恒显示 0）
+        display_count = len(cf_eps) if src.source_type == "cf-list" else node_count
+        repository.update_source_status(src.id, 1, display_count)
         try:
             repository.record_source_success(src.id)
         except Exception:
