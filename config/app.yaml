@@ -5,7 +5,7 @@ app:
   host: 0.0.0.0
   name: Sanl
   port: 8899
-  version: 2.6.0
+  version: 2.6.2
 database:
   path: ./data/nodes.db
 scheduler:
