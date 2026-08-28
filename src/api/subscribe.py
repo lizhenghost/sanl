@@ -27,7 +27,7 @@ def _cipher_of(nd, default="auto"):
 # ============ Clash ============
 
 def generate_clash(nodes: List[Node]) -> str:
-    """生成 Clash 基础版配置（过滤掉 hysteria/hysteria2 等不支持的协议）"""
+    """生成 Clash 基础版配置（过滤掉 hysteria/hysteria2/tuic 等不支持的协议）"""
     proxies = []
     for n in nodes:
         # Clash 基础版不支持 hysteria/hysteria2/tuic，跳过
@@ -790,8 +790,88 @@ def generate_mixed(nodes: List[Node]) -> str:
 
 
 def generate_clash_meta(nodes: List[Node]) -> str:
-    """Clash.Meta 兼容（与 clash 同构；Meta 内核字段超集）"""
-    return generate_clash(nodes)
+    """生成 Clash.Meta 兼容配置（支持 hysteria/hysteria2/tuic 等全部协议）"""
+    proxies = []
+    for n in nodes:
+        try:
+            nd = _nd(n)
+            p = {
+                "name": n.node_name or f"node_{n.id}",
+                "type": _clash_type(n.node_type),
+                "server": nd.get("server", ""),
+                "port": int(nd.get("port", 443)),
+            }
+            t = p["type"]
+
+            if t in ("ss", "ssr"):
+                p["cipher"] = _cipher_of(nd, "aes-128-gcm")
+                p["password"] = nd.get("password", "")
+                p["udp"] = bool(nd.get("udp", True))
+                if t == "ssr":
+                    p["obfs"] = nd.get("obfs", "plain")
+                    p["protocol"] = nd.get("protocol", "origin")
+                    p["obfs-param"] = nd.get("obfs-param", "")
+                    p["protocol-param"] = nd.get("protocol-param", "")
+                    if nd.get("group"): p["group"] = nd["group"]
+            elif t == "vmess":
+                p["uuid"] = nd.get("uuid", "")
+                p["alterId"] = int(nd.get("alterId", 0) or 0)
+                p["cipher"] = "auto"
+                _clash_transport(nd, p)
+                if nd.get("udp") is not False: p["udp"] = True
+            elif t == "vless":
+                p["uuid"] = nd.get("uuid", "")
+                p["flow"] = nd.get("flow", "")
+                p["udp"] = True
+                _clash_transport(nd, p)
+            elif t == "trojan":
+                p["password"] = nd.get("password", "")
+                p["udp"] = True
+                if nd.get("sni") or nd.get("servername"):
+                    p["sni"] = nd.get("sni") or nd.get("servername")
+                _clash_transport(nd, p)
+            elif t in ("hysteria2",):
+                p["password"] = nd.get("password", "")
+                if nd.get("obfs"): p["obfs"] = nd["obfs"]
+                if nd.get("obfs-password"): p["obfs-password"] = nd["obfs-password"]
+                if nd.get("up-speed"): p["up"] = str(nd["up-speed"])
+                if nd.get("down-speed"): p["down"] = str(nd["down-speed"])
+            elif t == "hysteria":
+                p["auth-str"] = nd.get("auth-str", nd.get("password", ""))
+                if nd.get("protocol"): p["protocol"] = nd["protocol"]
+                if nd.get("up-speed"): p["up"] = str(nd["up-speed"])
+                if nd.get("down-speed"): p["down"] = str(nd["down-speed"])
+                if nd.get("obfs"): p["obfs"] = nd["obfs"]
+                if nd.get("obfs-password"): p["obfs-password"] = nd["obfs-password"]
+            elif t == "tuic":
+                p["uuid"] = nd.get("uuid", "")
+                p["password"] = nd.get("password", "")
+                if nd.get("token"): p["token"] = nd["token"]
+                if nd.get("congestion-controller"):
+                    p["congestion-controller"] = nd["congestion-controller"]
+            elif t == "snell":
+                p["psk"] = nd.get("psk", nd.get("password", ""))
+                p["obfs"] = nd.get("obfs", "plain")
+                if nd.get("version"): p["version"] = nd["version"]
+            elif t == "wireguard":
+                p["private-key"] = nd.get("private-key", "")
+                p["ip"] = nd.get("ip", "")
+                if nd.get("dns"): p["dns"] = nd["dns"]
+                if nd.get("mtu"): p["mtu"] = nd["mtu"]
+                p["udp"] = True
+
+            _clash_tls(nd, p)
+            if n.country:
+                p["country"] = n.country
+            if n.country_code:
+                p["country_code"] = n.country_code
+            proxies.append(p)
+        except Exception:
+            continue
+
+    _dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+    return yaml.dump(_clash_full_config(proxies), Dumper=_dumper,
+                     default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 FORMAT_GENERATORS = {
