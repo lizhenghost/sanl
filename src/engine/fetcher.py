@@ -54,5 +54,5 @@ async def fetch_many(urls: List[str], concurrency: int = 10,
                         pass
                 return r
 
-        results = await asyncio.gather(*[guarded(u) for u in urls])
+        results = await asyncio.gather(*[guarded(u) for u in urls], return_exceptions=True)
     return list(results)

@@ -94,9 +94,11 @@ async def lookup_servers(servers: List[str], batch_size: int = 100) -> Dict[str,
     uniq_domains = [s for s in dict.fromkeys(pending)
                     if not _is_ipv4(s) and not _is_ipv6(s)]
     if uniq_domains:
-        resolved = await asyncio.gather(
-            *[loop.run_in_executor(None, _resolve, d) for d in uniq_domains])
+        tasks = [loop.run_in_executor(None, _resolve, d) for d in uniq_domains]
+        resolved = await asyncio.gather(*tasks, return_exceptions=True)
         for d, ip in zip(uniq_domains, resolved):
+            if isinstance(ip, Exception):
+                continue
             if ip and not _is_private_ip(ip):
                 resolve_map[d] = ip
 

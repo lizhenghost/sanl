@@ -1155,11 +1155,12 @@ def count_nodes_by_source_type(source_type: str) -> int:
 
 
 def apply_qualified_latency(threshold_ms: int) -> int:
-    """合格延迟判定：超过阈值的存活节点标记 inactive（订阅默认输出 active）"""
+    """合格延迟判定：超过阈值或未获取延迟的存活节点标记 inactive（订阅默认输出 active）"""
     with get_connection() as conn:
         cur = conn.execute(
             "UPDATE nodes SET status = 'inactive', updated_at = strftime('%s','now') "
-            "WHERE status = 'active' AND latency IS NOT NULL AND latency > ?",
+            "WHERE status = 'active' "
+            "AND (latency IS NULL OR latency > ?)",
             (threshold_ms,))
         return cur.rowcount
 

@@ -268,7 +268,7 @@ async def run_scan(params: dict) -> dict:
                     alive.append({"ip": ip, "latency_ms": lat})
             await asyncio.sleep(0)  # 让出事件循环
 
-        await asyncio.gather(*[_probe(ip) for ip in cands])
+        await asyncio.gather(*[_probe(ip) for ip in cands], return_exceptions=True)
         _log(f"TCP 阶段完成：存活 {len(alive)} 个")
 
         # 过滤延迟阈值 + 排序
@@ -301,7 +301,7 @@ async def run_scan(params: dict) -> dict:
                                     "speed_mbps": mbps, "colo": colo})
                     STATE["found"] += 1
 
-            await asyncio.gather(*[_detail(x) for x in shortlist])
+            await asyncio.gather(*[_detail(x) for x in shortlist], return_exceptions=True)
 
         results.sort(key=lambda r: (r["latency_ms"] if r["latency_ms"] is not None else 9999,
                                     -(r["speed_mbps"] or 0)))

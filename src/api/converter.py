@@ -128,8 +128,10 @@ async def _collect_input(raw: str, errors: List[str]) -> Tuple[List[Tuple[str, d
         sem = asyncio.Semaphore(CONCURRENCY)
         async with httpx.AsyncClient(follow_redirects=True, timeout=FETCH_TIMEOUT,
                                      verify=True) as client:
-            texts = await asyncio.gather(*[_fetch_one(client, u, sem, errors) for u in urls])
+            texts = await asyncio.gather(*[_fetch_one(client, u, sem, errors) for u in urls], return_exceptions=True)
         for url, text in zip(urls, texts):
+            if isinstance(text, Exception):
+                continue
             if text:
                 fetched += 1
                 all_items.extend(_parse_part(text, errors, label=url[:60]))

@@ -25,8 +25,11 @@ async def _worker(queue: asyncio.Queue, sem: asyncio.Semaphore, out: list):
             return
         host, port, idx = item
         async with sem:
-            out[idx] = {"host": host, "port": port,
-                        "latency_ms": await _tcping_shared(host, port, PING_TIMEOUT)}
+            try:
+                out[idx] = {"host": host, "port": port,
+                            "latency_ms": await _tcping_shared(host, port, PING_TIMEOUT)}
+            except Exception:
+                pass
         queue.task_done()
 
 

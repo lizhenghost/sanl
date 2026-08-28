@@ -101,5 +101,5 @@ async def batch_probe(candidates: List[Candidate], concurrency: int = 500,
             except Exception:
                 pass
 
-    await asyncio.gather(*[work(c) for c in candidates])
+    await asyncio.gather(*[work(c) for c in candidates], return_exceptions=True)
     logger.info(f"[engine] L1 完成 {dns_stats()}")

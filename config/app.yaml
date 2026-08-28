@@ -1,11 +1,11 @@
 app:
-  api_key: changeme
-  debug: true
+  api_key: sanl-8f4a2c91b7e6d305
+  debug: false
   engine_workdir: ./output/engine
   host: 0.0.0.0
   name: Sanl
   port: 8899
-  version: 2.5.2
+  version: 2.6.0
 database:
   path: ./data/nodes.db
 scheduler:

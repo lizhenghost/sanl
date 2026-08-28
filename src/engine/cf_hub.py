@@ -72,11 +72,14 @@ async def harvest_domains(domains: List[str], port: int = 443,
         async with sem:
             return d, await _resolve_host(d)
 
-    results = await asyncio.gather(*[_one(d) for d in domains])
+    results = await asyncio.gather(*[_one(d) for d in domains], return_exceptions=True)
 
     items = []
     resolved = 0
-    for domain, ips in results:
+    for r in results:
+        if isinstance(r, Exception):
+            continue
+        domain, ips = r
         if not ips and not _is_ip(domain):
             continue
         if _is_ip(domain):          # 本身就是 IP：直接当端点

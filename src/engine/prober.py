@@ -119,4 +119,4 @@ async def probe_candidates(km: KernelManager, candidates: List[Candidate],
                 queue.task_done()
 
     workers = [asyncio.create_task(worker(i)) for i in range(channels)]
-    await asyncio.gather(*workers)
+    await asyncio.gather(*workers, return_exceptions=True)

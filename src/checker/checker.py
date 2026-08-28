@@ -579,6 +579,7 @@ class Checker:
                 continue
 
             # subs-check 命名格式: 国家|速度|延迟|名称 —— 提取测速指标
+            # speed 模式下名称只含速度（国家|速度），需从速度估算延迟
             download_speed, latency, country = None, None, None
             if '|' in name:
                 parts = [p.strip() for p in name.split('|')]
@@ -605,6 +606,11 @@ class Checker:
                         break
                     if download_speed and latency:
                         break
+            # speed 模式名称不含延迟，从下载速度反推（subs-check 存活节点均为低速延迟）
+            if latency is None and download_speed is not None:
+                latency = max(50, int(2048000 / (download_speed or 256)))
+            elif latency is None:
+                latency = 500
 
             node_data = dict(proxy)  # clash 原字段即内部存储格式
             node_data.pop('name', None)

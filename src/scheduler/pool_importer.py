@@ -58,7 +58,7 @@ async def run_pool_import(scraper: Optional[Scraper] = None, source_id: Optional
                                     detail=f"完成 {done_counter['n']}/{len(sources)} · 成功{summary['sources_ok']} 失败{summary['sources_failed']}")
                 return r
 
-        await asyncio.gather(*[_one(s) for s in sources])
+        await asyncio.gather(*[_one(s) for s in sources], return_exceptions=True)
         summary["elapsed_sec"] = round(time.time() - started, 1)
         task_manager.finish(tid)
         logger.info(f"池导入完成: {summary}")
