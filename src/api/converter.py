@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import re
+import json
 from typing import List, Optional, Tuple
 
 import httpx
@@ -207,8 +208,16 @@ async def convert_subscription(req: ConvertRequest):
 
     # 检查导出器是否因协议不兼容过滤了所有节点（如 Clash 基础版过滤 hysteria2）
     import re
-    proxy_lines = re.findall(r'^- name:', content, re.MULTILINE)
-    actual_exported = len(proxy_lines)
+    if req.target in ("clash", "clash-meta"):
+        proxy_lines = re.findall(r'^- name:', content, re.MULTILINE)
+        actual_exported = len(proxy_lines)
+    else:
+        # JSON 格式（singbox 等）
+        try:
+            jd = json.loads(content)
+            actual_exported = len(jd.get("outbounds", []))
+        except Exception:
+            actual_exported = 0
     if actual_exported == 0 and len(filtered) > 0:
         return ConvertResponse(
             ok=False, target=req.target, fetched=fetched,

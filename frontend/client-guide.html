@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sanl - 客户端订阅指南</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f7fa;
+      color: #333;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { text-align: center; margin-bottom: 8px; color: #1a73e8; font-size: 28px; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 14px; }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card h2 .icon { font-size: 24px; }
+    .platform-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .tag-android { background: #e8f5e9; color: #2e7d32; }
+    .tag-ios { background: #e3f2fd; color: #1565c0; }
+    .tag-windows { background: #e8eaf6; color: #283593; }
+    .tag-macos { background: #fce4ec; color: #880e4f; }
+    .tag-linux { background: #fff3e0; color: #e65100; }
+    .tag-all { background: #f3e5f5; color: #6a1b9a; }
+    .url-box {
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .url-box input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-size: 13px;
+      font-family: 'SF Mono', Monaco, monospace;
+      color: #1a73e8;
+      outline: none;
+    }
+    .url-box button {
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .url-box button:hover { background: #1557b0; }
+    .url-box button.copied { background: #2e7d32; }
+    .desc { font-size: 13px; color: #666; margin-bottom: 10px; }
+    .format-info {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #fff3e0;
+      color: #e65100;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .warning {
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      color: #f57f17;
+      margin-top: 10px;
+    }
+    .warning strong { color: #e65100; }
+    .success {
+      background: #e8f5e9;
+      border: 1px solid #a5d6a7;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      color: #2e7d32;
+      margin-top: 10px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 24px 0 12px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .stat .num { font-size: 24px; font-weight: 700; color: #1a73e8; }
+    .stat .label { font-size: 12px; color: #888; margin-top: 4px; }
+    .footer { text-align: center; font-size: 12px; color: #aaa; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔗 Sanl 客户端订阅指南</h1>
+    <p class="subtitle">为各主流代理客户端提供专用订阅链接，兼容所有平台</p>
+
+    <div class="stats" id="stats">
+      <div class="stat"><div class="num" id="stat-total">--</div><div class="label">总节点</div></div>
+      <div class="stat"><div class="num" id="stat-active">--</div><div class="label">可用</div></div>
+      <div class="stat"><div class="num" id="stat-formats">8</div><div class="label">格式</div></div>
+      <div class="stat"><div class="num" id="stat-clients">7</div><div class="label">客户端</div></div>
+    </div>
+
+    <div class="section-title">📱 移动客户端</div>
+
+    <!-- Sing-box -->
+    <div class="card">
+      <h2><span class="icon">📦</span> Sing-box <span class="format-info">JSON</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-android">Android</span>
+        <span class="tag tag-ios">iOS</span>
+        <span class="tag tag-macos">macOS</span>
+      </div>
+      <p class="desc">原生 JSON 格式，支持所有协议（含 Hysteria2 / TUIC / VLESS）。Android/iOS 首选。</p>
+      <div class="url-box">
+        <input type="text" id="url-singbox" readonly>
+        <button onclick="copyUrl('url-singbox', this)">复制</button>
+      </div>
+      <div class="success">✅ 完整协议支持：ss / vmess / vless / trojan / hysteria2 / hysteria / tuic / socks5 / http</div>
+    </div>
+
+    <!-- Clash Meta (Mihomo) -->
+    <div class="card">
+      <h2><span class="icon">⚔️</span> Clash Meta / Mihomo <span class="format-info">YAML</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-android">Android</span>
+        <span class="tag tag-ios">iOS</span>
+        <span class="tag tag-windows">Windows</span>
+        <span class="tag tag-macos">macOS</span>
+        <span class="tag tag-linux">Linux</span>
+      </div>
+      <p class="desc">Clash Meta (Mihomo) 内核配置，支持所有协议包括 Hysteria2 / TUIC。功能最完整的 Clash 变体。</p>
+      <div class="url-box">
+        <input type="text" id="url-clash-meta" readonly>
+        <button onclick="copyUrl('url-clash-meta', this)">复制</button>
+      </div>
+      <div class="success">✅ 完整协议支持 + DNS 防污染 + AI 解锁规则 + 流媒体分流</div>
+    </div>
+
+    <!-- Clash (基础版) -->
+    <div class="card">
+      <h2><span class="icon">🌀</span> Clash 基础版 <span class="format-info">YAML</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-android">Android</span>
+        <span class="tag tag-ios">iOS</span>
+        <span class="tag tag-windows">Windows</span>
+        <span class="tag tag-macos">macOS</span>
+      </div>
+      <p class="desc">Clash 原版配置，过滤了 Hysteria2 / TUIC 等不支持的协议，仅输出 ss/vmess/vless/trojan。</p>
+      <div class="url-box">
+        <input type="text" id="url-clash" readonly>
+        <button onclick="copyUrl('url-clash', this)">复制</button>
+      </div>
+      <div class="warning">⚠️ 仅支持 ss / vmess / vless / trojan 协议（Clash 原版不含 hysteria2/tuic）</div>
+    </div>
+
+    <!-- NekoBox -->
+    <div class="card">
+      <h2><span class="icon">🐱</span> NekoBox <span class="format-info">混合</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-android">Android</span>
+        <span class="tag tag-ios">iOS</span>
+      </div>
+      <p class="desc">NekoBox 支持导入 Clash YAML 和 Sing-box JSON 两种格式。推荐 Sing-box 格式以获得完整协议支持。</p>
+      <div class="url-box">
+        <input type="text" id="url-neko-singbox" readonly>
+        <button onclick="copyUrl('url-neko-singbox', this)">复制 Sing-box</button>
+      </div>
+      <div class="url-box">
+        <input type="text" id="url-neko-clash" readonly>
+        <button onclick="copyUrl('url-neko-clash', this)">复制 Clash</button>
+      </div>
+      <div class="success">✅ 推荐 Sing-box 格式（完整协议）；Clash 格式兼容但不含 hysteria2/tuic</div>
+    </div>
+
+    <!-- Karing -->
+    <div class="card">
+      <h2><span class="icon">🔮</span> Karing <span class="format-info">混合</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-android">Android</span>
+        <span class="tag tag-ios">iOS</span>
+      </div>
+      <p class="desc">Karing 支持 Clash Meta 和 Sing-box 格式，功能强大，支持规则引擎和策略组。</p>
+      <div class="url-box">
+        <input type="text" id="url-karing-singbox" readonly>
+        <button onclick="copyUrl('url-karing-singbox', this)">复制 Sing-box</button>
+      </div>
+      <div class="url-box">
+        <input type="text" id="url-karing-clash" readonly>
+        <button onclick="copyUrl('url-karing-clash', this)">复制 Clash Meta</button>
+      </div>
+      <div class="success">✅ 推荐 Sing-box 格式；Clash Meta 格式含完整规则和分流</div>
+    </div>
+
+    <!-- V2rayN -->
+    <div class="card">
+      <h2><span class="icon">🎯</span> V2rayN <span class="format-info">YAML</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-windows">Windows</span>
+        <span class="tag tag-linux">Linux</span>
+      </div>
+      <p class="desc">V2rayN 使用 Clash Meta (Mihomo) 格式，支持所有协议。导入订阅后自动更新。</p>
+      <div class="url-box">
+        <input type="text" id="url-v2rayn" readonly>
+        <button onclick="copyUrl('url-v2rayn', this)">复制</button>
+      </div>
+      <div class="success">✅ 使用 Clash Meta 格式，支持 hysteria2 / tuic / vless / trojan 等全协议</div>
+    </div>
+
+    <!-- Stash -->
+    <div class="card">
+      <h2><span class="icon">📲</span> Stash (iOS) <span class="format-info">YAML</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-ios">iOS</span>
+        <span class="tag tag-macos">macOS</span>
+      </div>
+      <p class="desc">Stash 是 iOS 上功能最强大的 Clash 客户端，支持 Clash Meta 格式。</p>
+      <div class="url-box">
+        <input type="text" id="url-stash" readonly>
+        <button onclick="copyUrl('url-stash', this)">复制</button>
+      </div>
+      <div class="success">✅ 使用 Clash Meta 格式，支持所有协议和高级规则</div>
+    </div>
+
+    <div class="section-title">🔧 其他格式</div>
+
+    <!-- V2Ray 明文 -->
+    <div class="card">
+      <h2><span class="icon">🔗</span> V2Ray 明文链接 <span class="format-info">TXT</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-all">全平台</span>
+      </div>
+      <p class="desc">纯文本协议链接，每行一个，可直接复制粘贴到任何支持手动输入的客户端。</p>
+      <div class="url-box">
+        <input type="text" id="url-v2ray" readonly>
+        <button onclick="copyUrl('url-v2ray', this)">复制</button>
+      </div>
+    </div>
+
+    <!-- Base64 -->
+    <div class="card">
+      <h2><span class="icon">🔐</span> Base64 编码订阅 <span class="format-info">B64</span></h2>
+      <div class="platform-tags">
+        <span class="tag tag-all">全平台</span>
+      </div>
+      <p class="desc">将所有节点链接 Base64 编码后拼接，适合在浏览器地址栏分享或存入笔记软件。</p>
+      <div class="url-box">
+        <input type="text" id="url-base64" readonly>
+        <button onclick="copyUrl('url-base64', this)">复制</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>Sanl · 免费节点池聚合平台 · 支持 8 种格式 · 7 款客户端</p>
+      <p style="margin-top:4px;">订阅链接每 3~10 秒自动刷新 · 节点状态实时更新</p>
+    </div>
+  </div>
+
+  <script>
+    // 自动填充订阅链接
+    const BASE = window.location.origin;
+    const urls = {
+      'url-singbox':     `${BASE}/api/nodes/subscribe?fmt=singbox`,
+      'url-clash-meta':  `${BASE}/api/nodes/subscribe?fmt=clash-meta`,
+      'url-clash':       `${BASE}/api/nodes/subscribe?fmt=clash`,
+      'url-neko-singbox':`${BASE}/api/nodes/subscribe?fmt=singbox`,
+      'url-neko-clash':  `${BASE}/api/nodes/subscribe?fmt=clash`,
+      'url-karing-singbox':`${BASE}/api/nodes/subscribe?fmt=singbox`,
+      'url-karing-clash':`${BASE}/api/nodes/subscribe?fmt=clash-meta`,
+      'url-v2rayn':      `${BASE}/api/nodes/subscribe?fmt=clash-meta`,
+      'url-stash':       `${BASE}/api/nodes/subscribe?fmt=clash-meta`,
+      'url-v2ray':       `${BASE}/api/nodes/subscribe?fmt=v2ray`,
+      'url-base64':      `${BASE}/api/nodes/subscribe?fmt=base64`,
+    };
+
+    Object.entries(urls).forEach(([id, url]) => {
+      document.getElementById(id).value = url;
+    });
+
+    function copyUrl(inputId, btn) {
+      const input = document.getElementById(inputId);
+      input.select();
+      navigator.clipboard.writeText(input.value).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '已复制 ✓';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+
+    // 加载节点统计
+    fetch('/api/nodes/stats')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('stat-total').textContent = (d.pool_total || d.total || 0).toLocaleString();
+        document.getElementById('stat-active').textContent = (d.active || 0).toLocaleString();
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
