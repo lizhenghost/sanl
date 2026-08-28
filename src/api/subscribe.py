@@ -119,59 +119,102 @@ def generate_clash(nodes: List[Node]) -> str:
 
 
 def _clash_full_config(proxies: list) -> dict:
-    """补全 Clash 配置结构：proxies + proxy-groups + rules（方案 1.6 自定义代理组规则）。
-    原实现仅输出 proxies 数组，部分客户端直接导入会失败。"""
-    names = []
-    seen = set()
+    """补全 Clash 配置：proxies + proxy-groups + rules + dns。
+    增强：DNS 防污染(fake-ip) + AI 解锁 + 流媒体分流 + 广告拦截 + 国内直连。"""
+
+    names, seen = [], set()
     for p in proxies:
         nm = p.get("name", "")
         if nm and nm not in seen:
             seen.add(nm)
             names.append(nm)
-
     if not names:
         return {"proxies": proxies}
 
-    # 按国家分组（值取 country 字段，缺省归入「其他节点」）
-    # country 字段可能存 emoji flag（如 🇳🇱），软硬件渲染不统一 → 加中文名。Node 有 country_code 时用之。
+    # ---- 按国家分组 ----
     groups_by_country = {}
     for p in proxies:
-        c = (p.get("country") or "其他节点").strip()
-        c = _country_label(c, p.get("country_code"))
+        c = _country_label((p.get("country") or "其他节点").strip(), p.get("country_code"))
         groups_by_country.setdefault(c, []).append(p["name"])
+    country_names = list(groups_by_country.keys())
 
+    # ---- 策略组 ----
     proxy_groups = [
-        {
-            "name": "🚀 自动选择",
-            "type": "url-test",
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 50,
-            "proxies": names,
-        }
+        {"name": "🚀 节点选择", "type": "select",
+         "proxies": ["🚀 自动选择", "🤖 AI 解锁", "🎬 流媒体", "♻️ 故障转移"] + country_names + ["DIRECT"]},
+        {"name": "🚀 自动选择", "type": "url-test",
+         "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": names},
+        {"name": "♻️ 故障转移", "type": "fallback",
+         "url": "http://www.gstatic.com/generate_204", "interval": 300, "proxies": names},
+        {"name": "🤖 AI 解锁", "type": "select",
+         "proxies": ["🚀 自动选择"] + [g for g in country_names if g in ("美国","日本","新加坡","英国","德国")] + names[:20]},
+        {"name": "🎬 流媒体", "type": "select",
+         "proxies": ["🚀 自动选择"] + country_names + names[:20]},
     ]
-    # 各国家/地区策略组（select 便于手动选）
     for cname, nodelist in groups_by_country.items():
-        proxy_groups.append({
-            "name": cname if cname else "其他节点",
-            "type": "select",
-            "proxies": ["🚀 自动选择", "DIRECT"] + nodelist,
-        })
+        proxy_groups.append({"name": cname, "type": "select", "proxies": ["🚀 自动选择","DIRECT"] + nodelist})
 
-    proxy_groups.append({
-        "name": "🚀 节点选择",
-        "type": "select",
-        "proxies": (["🚀 自动选择"] + list(groups_by_country.keys()) + ["DIRECT"]),
-    })
-
+    # ---- 规则集（从上到下，先匹配先生效）----
     rules = [
-        # 国内直连 + 局域网/本地 DNS 走直连
+        # 广告拦截
+        "DOMAIN-SUFFIX,adnxs.com,REJECT","DOMAIN-SUFFIX,doubleclick.net,REJECT",
+        "DOMAIN-SUFFIX,googlesyndication.com,REJECT","DOMAIN-SUFFIX,google-analytics.com,REJECT",
+        "DOMAIN-SUFFIX,googletagmanager.com,REJECT","DOMAIN-KEYWORD,adsense,REJECT",
+        # 本地/局域网
+        "DOMAIN-SUFFIX,local,DIRECT","IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve","IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+        "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve","IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+        # AI 平台
+        "DOMAIN-SUFFIX,openai.com,🤖 AI 解锁","DOMAIN-SUFFIX,chatgpt.com,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,oaistatic.com,🤖 AI 解锁","DOMAIN-SUFFIX,oaiusercontent.com,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,anthropic.com,🤖 AI 解锁","DOMAIN-SUFFIX,claude.ai,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,gemini.google.com,🤖 AI 解锁","DOMAIN-SUFFIX,bard.google.com,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,copilot.microsoft.com,🤖 AI 解锁","DOMAIN-SUFFIX,perplexity.ai,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,huggingface.co,🤖 AI 解锁","DOMAIN-SUFFIX,midjourney.com,🤖 AI 解锁",
+        "DOMAIN-SUFFIX,stability.ai,🤖 AI 解锁","DOMAIN-KEYWORD,openai,🤖 AI 解锁",
+        # 流媒体
+        "DOMAIN-SUFFIX,netflix.com,🎬 流媒体","DOMAIN-SUFFIX,nflxvideo.net,🎬 流媒体",
+        "DOMAIN-KEYWORD,netflix,🎬 流媒体","DOMAIN-SUFFIX,youtube.com,🎬 流媒体",
+        "DOMAIN-SUFFIX,googlevideo.com,🎬 流媒体","DOMAIN-SUFFIX,ytimg.com,🎬 流媒体",
+        "DOMAIN-SUFFIX,disneyplus.com,🎬 流媒体","DOMAIN-KEYWORD,disney,🎬 流媒体",
+        "DOMAIN-SUFFIX,hbomax.com,🎬 流媒体","DOMAIN-SUFFIX,primevideo.com,🎬 流媒体",
+        "DOMAIN-SUFFIX,spotify.com,🎬 流媒体","DOMAIN-KEYWORD,tiktok,🎬 流媒体",
+        "DOMAIN-SUFFIX,bilibili.tv,🎬 流媒体",
+        # 国内直连
+        "DOMAIN-SUFFIX,cn,DIRECT","DOMAIN-SUFFIX,qq.com,DIRECT",
+        "DOMAIN-SUFFIX,weixin.com,DIRECT","DOMAIN-SUFFIX,taobao.com,DIRECT",
+        "DOMAIN-SUFFIX,jd.com,DIRECT","DOMAIN-SUFFIX,baidu.com,DIRECT",
+        "DOMAIN-SUFFIX,bilibili.com,DIRECT","DOMAIN-SUFFIX,douyin.com,DIRECT",
+        "DOMAIN-SUFFIX,163.com,DIRECT","DOMAIN-SUFFIX,alipay.com,DIRECT",
+        "DOMAIN-SUFFIX,aliyun.com,DIRECT","DOMAIN-SUFFIX,alicdn.com,DIRECT",
+        "DOMAIN-SUFFIX,weibo.com,DIRECT","DOMAIN-SUFFIX,zhihu.com,DIRECT",
+        "DOMAIN-SUFFIX,xiaomi.com,DIRECT","DOMAIN-SUFFIX,myqcloud.com,DIRECT",
         "GEOIP,CN,DIRECT",
-        "DOMAIN-SUFFIX,knowngraph.com,DIRECT",
+        # 常被墙服务
+        "DOMAIN-SUFFIX,google.com,🚀 节点选择","DOMAIN-SUFFIX,googleapis.com,🚀 节点选择",
+        "DOMAIN-SUFFIX,telegram.org,🚀 节点选择","DOMAIN-SUFFIX,t.me,🚀 节点选择",
+        "DOMAIN-KEYWORD,telegram,🚀 节点选择",
+        "DOMAIN-SUFFIX,github.com,🚀 节点选择","DOMAIN-SUFFIX,githubusercontent.com,🚀 节点选择",
+        "DOMAIN-SUFFIX,wikipedia.org,🚀 节点选择","DOMAIN-SUFFIX,reddit.com,🚀 节点选择",
+        "DOMAIN-SUFFIX,x.com,🚀 节点选择","DOMAIN-SUFFIX,twimg.com,🚀 节点选择",
+        "DOMAIN-SUFFIX,facebook.com,🚀 节点选择","DOMAIN-SUFFIX,instagram.com,🚀 节点选择",
+        "DOMAIN-SUFFIX,whatsapp.com,🚀 节点选择",
+        # 兜底
         "MATCH,🚀 节点选择",
     ]
 
-    return {"proxies": proxies, "proxy-groups": proxy_groups, "rules": rules}
+    # ---- DNS 防污染（fake-ip 模式，国内外分流）----
+    dns_config = {
+        "enable": True, "listen": "0.0.0.0:1053",
+        "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
+        "fake-ip-filter": ["*.lan","*.local","localhost.ptlogin2.qq.com","+.msftconnecttest.com","+.msftncsi.com","*.cn"],
+        "nameserver": ["https://223.5.5.5/dns-query","https://1.12.12.12/dns-query","119.29.29.29"],
+        "fallback": ["https://1.1.1.1/dns-query","https://8.8.8.8/dns-query","tls://8.8.8.8:853"],
+        "fallback-filter": {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"],
+            "domain": ["+.google.com","+.youtube.com","+.facebook.com","+.github.com"]},
+    }
+
+    return {"proxies": proxies, "proxy-groups": proxy_groups, "rules": rules, "dns": dns_config}
 
 
 # 常见国旗 emoji → 中文国家名（订阅分组名若要可读，避免客户端显示 □□）
