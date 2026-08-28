@@ -205,9 +205,21 @@ async def convert_subscription(req: ConvertRequest):
         return ConvertResponse(ok=False, target=req.target, fetched=fetched,
                                parsed=len(items), errors=errors + [f"导出失败: {e}"])
 
+    # 检查导出器是否因协议不兼容过滤了所有节点（如 Clash 基础版过滤 hysteria2）
+    import re
+    proxy_lines = re.findall(r'^- name:', content, re.MULTILINE)
+    actual_exported = len(proxy_lines)
+    if actual_exported == 0 and len(filtered) > 0:
+        return ConvertResponse(
+            ok=False, target=req.target, fetched=fetched,
+            parsed=len(items), exported=0,
+            content="", errors=errors + [
+                f"所有 {len(filtered)} 个节点被导出器过滤（协议 {req.target} 不支持 {filtered[0][0]}）"
+            ])
+
     return ConvertResponse(
         ok=True, target=req.target, fetched=fetched,
-        parsed=len(items), exported=len(filtered),
+        parsed=len(items), exported=actual_exported,
         content=content, content_type=EXPORT_CONTENT_TYPES[req.target],
         errors=errors,
     )

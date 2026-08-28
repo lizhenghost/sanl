@@ -2,16 +2,16 @@ alive-test-url: http://gstatic.com/generate_204
 check-interval: 30
 concurrent: 240
 download-mb: 1
-download-timeout: 6
+download-timeout: 1
 filter: []
 listen-port: :8199
 media-check: false
 media-concurrent: 20
-min-speed: 128
+min-speed: 0
 node-prefix: ''
 output-dir: ./output
 print-progress: false
-rename-node: true
+rename-node: false
 save-method: local
 source:
   subscriptions: []

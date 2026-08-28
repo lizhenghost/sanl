@@ -27,8 +27,12 @@ def _cipher_of(nd, default="auto"):
 # ============ Clash ============
 
 def generate_clash(nodes: List[Node]) -> str:
+    """生成 Clash 基础版配置（过滤掉 hysteria/hysteria2 等不支持的协议）"""
     proxies = []
     for n in nodes:
+        # Clash 基础版不支持 hysteria/hysteria2/tuic，跳过
+        if n.node_type in ("hysteria", "hysteria2", "hy2", "tuic"):
+            continue
         try:
             nd = _nd(n)
             p = {
