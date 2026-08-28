@@ -263,10 +263,18 @@ class Checker:
                     logger.info(f"Qualified-latency check (>{threshold}ms): {marked} nodes marked inactive")
                 except Exception as qe:
                     logger.warning(f"apply qualified latency failed: {qe}")
-                # 测速后异步刷新 GeoIP 出口识别（不阻塞返回）
+                # 测速后异步刷新 GeoIP 出口识别（不阻塞返回；外层捕获避免 Future exception 泄漏）
                 import asyncio
                 from ..geoip import refresh_node_geo
-                asyncio.create_task(refresh_node_geo(limit=300))
+
+                async def _safe_geo():
+                    try:
+                        await refresh_node_geo(limit=300)
+                    except Exception as ge:
+                        logger.warning(f"GeoIP refresh failed: {ge}")
+
+                _t = asyncio.create_task(_safe_geo())
+                _t.add_done_callback(lambda fut: None)  # 消费异常，避免 asyncio 报 unretrieved
             else:
                 err = result.get("error", "Unknown error")
                 repository.update_check_job(job_id.id, "failed", error=err)

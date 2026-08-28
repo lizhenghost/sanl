@@ -185,8 +185,9 @@ class Scraper:
 
     async def _get_with_mirrors(self, url: str) -> Optional[str]:
         """直连优先，失败后依次尝试 GitHub 镜像前缀（仅对 raw.githubusercontent.com / github.com 生效）"""
+        # 单次抓取总超时 30s（连接+读取），防慢源卡死整轮池导入
         try:
-            resp = await self.client.get(url)
+            resp = await self.client.get(url, timeout=20.0)
             resp.raise_for_status()
             return resp.text.strip()
         except Exception as e:
@@ -195,7 +196,7 @@ class Scraper:
             # 连接池坏死自愈：重建 client 后重试一次
             try:
                 await self._rebuild_client()
-                resp = await self.client.get(url)
+                resp = await self.client.get(url, timeout=20.0)
                 resp.raise_for_status()
                 logger.info(f"重建连接后重试成功: {url}")
                 return resp.text.strip()
