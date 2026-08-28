@@ -47,3 +47,20 @@
 | `POST /api/cf/to-nodes` | 优质端点⭐→节点变体入池 |
 | `GET /api/tasks` | 后台任务状态 |
 | `GET /api/sources/health` | 来源源健康检查 |
+
+## v2.6.1 修复——ClastMate 导入报错
+
+**现象**：Android ClashMate 导入订阅时报 `yaml: unmarshal errors: line 1: cannot unmarshal !!str 'hysteri...' into config.RawConfig`
+
+**根因**：subs-check 存库的节点包含 hysteria/hysteria2/tuic 协议，
+但 Clash 基础版（非 Meta）不支持这些协议，生成 YAML 后 ClashMate 解析失败。
+
+**修复**：
+1. `src/api/subscribe.py::generate_clash()` 跳过 `hysteria/hysteria2/tuic` 节点
+2. `src/api/converter.py::convert_text()` 检测空导出并返回明确错误
+3. 订阅端点 `/api/nodes/subscribe?format=clash` 自动过滤
+
+**验证**：
+- `hysteria2 → clash` → `ok=False`，错误信息明确
+- `hysteria2 → clash-meta` → `ok=True`，正常导出
+- `ss + hysteria2 → clash` → `ok=True`，仅导出 ss 节点
