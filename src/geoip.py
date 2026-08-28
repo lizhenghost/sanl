@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 IPAPI_BATCH_URL = "http://ip-api.com/batch"
 # 免费版字段限制内可用的字段
-FIELDS = "status,country,countryCode,lat,lon,query"
+FIELDS = "status,country,countryCode,lat,lon,city"
 
 # 内存缓存: server -> (ts, result)，避免重复查询
 _geo_cache: Dict[str, tuple] = {}
@@ -135,6 +135,7 @@ async def lookup_servers(servers: List[str], batch_size: int = 100) -> Dict[str,
                             "country_code": item.get("countryCode", ""),
                             "lat": item.get("lat", 0),
                             "lon": item.get("lon", 0),
+                            "city": item.get("city", ""),
                         }
                         # 回写到所有指向该 IP 的原始 server（含域名）
                         for owner in target_owner.get(orig_ip, [orig_ip]):
@@ -189,9 +190,10 @@ async def refresh_node_geo(limit: int = 300) -> dict:
             continue
         code = info["country_code"]
         flag = _emoji_flag(code)
-        # country 相同但 country_code 未写入时也要更新
-        if flag and (n.country != flag or getattr(n, "country_code", None) != code):
-            repository.update_node_geo(n.id, flag, code)
+        city = info.get("city", "")
+        # country 相同但 country_code 未写入时也要更新；city 缺失也补
+        if flag and (n.country != flag or getattr(n, "country_code", None) != code or not getattr(n, "city", None)):
+            repository.update_node_geo(n.id, flag, code, city)
             updated += 1
 
     logger.info(f"GeoIP refreshed: {updated}/{len(nodes)} nodes updated ({len(servers)} servers looked up)")

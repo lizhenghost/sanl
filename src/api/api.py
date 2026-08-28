@@ -435,6 +435,17 @@ async def list_cf_endpoints(
             "endpoints": items}
 
 
+@api_router.get("/cf/endpoints/{endpoint_id}")
+@cached(ttl=10)
+async def get_cf_endpoint_detail(endpoint_id: int):
+    """CF 优选端点详情"""
+    from ..schema.repository import get_cf_endpoint
+    item = get_cf_endpoint(endpoint_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="端点不存在")
+    return item
+
+
 @api_router.post("/cf/ping")
 async def ping_cf_endpoints(
     background_tasks: BackgroundTasks,

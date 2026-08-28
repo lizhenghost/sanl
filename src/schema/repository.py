@@ -31,6 +31,7 @@ def _migrate(conn):
     add_column("nodes", "favorite", "INTEGER NOT NULL DEFAULT 0")
     add_column("tokens", "traffic_limit_mb", "REAL NOT NULL DEFAULT 0")  # 0=不限流（大纲 J.2 按流量限制）
     add_column("nodes", "stream_flags", "TEXT")  # 流媒体解锁标记（大纲 附录B/H：Netflix/Disney 等）
+    add_column("nodes", "city", "TEXT")  # GeoIP 城市信息（附录：优化 geoip_city 补全）
 
     # 节点健康历史（近 N 天延迟/存活趋势，附录：优化 #4）
     conn.execute("""
@@ -299,11 +300,28 @@ def _parse_node_data(raw) -> dict:
 
 
 def list_nodes_missing_geo(limit: int = 300, status: str = "active") -> List[Node]:
-    """取国家或国家码尚未填充的节点（GeoIP 刷新优先补这些，避免对已正确节点做无效查询）"""
+    """取国家/国家码/城市尚未填充的节点（GeoIP 刷新优先补这些）"""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM nodes WHERE status=? AND (country IS NULL OR country='' "
-            "OR country_code IS NULL OR country_code='') ORDER BY id ASC LIMIT ?",
+            "OR country_code IS NULL OR country_code='' OR city IS NULL OR city='') "
+            "ORDER BY id ASC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        nodes = []
+        for r in rows:
+            d = dict(r)
+            d['node_data'] = _parse_node_data(d.get('node_data'))
+            nodes.append(Node(**d))
+        return nodes
+
+
+def list_nodes_missing_city(limit: int = 300, status: str = "active") -> List[Node]:
+    """取城市字段尚未填充的节点（与 list_nodes_missing_geo 互补，专注 city 补全）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM nodes WHERE status=? AND (city IS NULL OR city='') "
+            "ORDER BY id ASC LIMIT ?",
             (status, limit),
         ).fetchall()
         nodes = []
@@ -439,6 +457,13 @@ def upsert_cf_endpoints(items: List[dict], source_id: Optional[int] = None,
 def count_cf_endpoints() -> int:
     with get_connection() as conn:
         return conn.execute("SELECT COUNT(*) FROM cf_endpoints").fetchone()[0]
+
+
+def get_cf_endpoint(endpoint_id: int) -> Optional[dict]:
+    """获取单个 CF 端点详情"""
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM cf_endpoints WHERE id = ?", (endpoint_id,)).fetchone()
+        return dict(row) if row else None
 
 
 def init_db():
@@ -968,12 +993,12 @@ def score_grade(score: float) -> dict:
     return {"grade": "劣质", "emoji": "🔴"}
 
 
-def update_node_geo(node_id: int, country: str, country_code: str):
-    """更新节点 GeoIP 出口信息"""
+def update_node_geo(node_id: int, country: str, country_code: str, city: str = ""):
+    """更新节点 GeoIP 出口信息（含城市）"""
     with get_connection() as conn:
         conn.execute(
-            "UPDATE nodes SET country = ?, country_code = ?, updated_at = ? WHERE id = ?",
-            (country, country_code, int(__import__('time').time()), node_id)
+            "UPDATE nodes SET country = ?, country_code = ?, city = ?, updated_at = ? WHERE id = ?",
+            (country, country_code, city, int(__import__('time').time()), node_id)
         )
 
 

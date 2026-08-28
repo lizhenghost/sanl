@@ -60,6 +60,7 @@ class Node:
     fingerprint: Optional[str] = None
     last_seen_at: Optional[int] = None
     favorite: int = 0
+    city: Optional[str] = None  # GeoIP 城市信息
 
 
 @dataclass
