@@ -462,6 +462,7 @@ class Checker:
                 start_new_session=True,
             )
             pump = asyncio.create_task(self._pump_stream(process.stdout, logfile))
+            pump.add_done_callback(lambda fut: None)  # 消费异常，避免 asyncio 报 unretrieved
 
             max_wait = 5400  # 90 分钟
             waited = 0

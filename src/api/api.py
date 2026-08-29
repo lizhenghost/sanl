@@ -627,6 +627,7 @@ async def list_nodes(
         d = {
             "id": n.id, "node_name": n.node_name, "node_type": n.node_type,
             "status": n.status, "country": n.country, "country_code": getattr(n, "country_code", None),
+            "city": getattr(n, "city", None),  # GeoIP 城市信息
             "latency": n.latency, "download_speed": n.download_speed, "score": n.score,
             "last_checked_at": n.last_checked_at, "fail_count": getattr(n, "fail_count", 0),
             "stream_flags": getattr(n, "stream_flags", None),  # 流媒体解锁标记（Netflix/Disney/YouTube 等）
@@ -938,6 +939,7 @@ async def get_node_detail(node_id: int):
     return {
         "id": n.id, "node_name": n.node_name, "node_type": n.node_type,
         "status": n.status, "country": n.country, "country_code": getattr(n, "country_code", None),
+        "city": getattr(n, "city", None),  # GeoIP 城市信息
         "latency": n.latency, "download_speed": n.download_speed, "score": n.score,
         "fail_count": getattr(n, "fail_count", 0), "stream_flags": getattr(n, "stream_flags", None),
         "source_id": n.source_id, "subscribe_url": getattr(n, "subscribe_url", None),
